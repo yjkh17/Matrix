@@ -206,9 +206,8 @@
     if (!self.frameBuffer || sizeChanged) {
         self.frameBuffer = [[NSImage alloc] initWithSize:currentSize];
         [self.frameBuffer lockFocus];
-        NSGradient *deepGreenGradient = [[NSGradient alloc] initWithStartingColor:[NSColor colorWithCalibratedRed:0.01 green:0.1 blue:0.05 alpha:1.0]
-                                                                      endingColor:[NSColor colorWithCalibratedRed:0.04 green:0.16 blue:0.08 alpha:1.0]];
-        [deepGreenGradient drawInRect:NSMakeRect(0, 0, currentSize.width, currentSize.height) angle:270.0];
+        [[NSColor colorWithCalibratedWhite:0.02 alpha:1.0] set];
+        NSRectFill(NSMakeRect(0, 0, currentSize.width, currentSize.height));
         [self.frameBuffer unlockFocus];
         [self resetColumns];
     }
@@ -268,7 +267,7 @@
 
     NSRect imageRect = NSMakeRect(0, 0, self.frameBuffer.size.width, self.frameBuffer.size.height);
 
-    [[NSColor colorWithCalibratedRed:0.02 green:0.1 blue:0.06 alpha:0.08] set];
+    [[NSColor colorWithCalibratedWhite:0.0 alpha:0.02] set];
     NSRectFillUsingOperation(imageRect, NSCompositingOperationSourceOver);
 
     CGFloat bufferHeight = self.frameBuffer.size.height;
