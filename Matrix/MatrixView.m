@@ -38,6 +38,7 @@ static const CGFloat kMinimumVisibleOpacity = 0.02;
 - (NSTimeInterval)randomGlyphDwellTime;
 - (NSTimeInterval)randomHeadGlyphDwellTime;
 - (NSTimeInterval)randomRowGlyphDwellTime;
+- (NSTimeInterval)fadeDurationForBaseSpeed:(CGFloat)baseSpeed;
 - (void)ensureFrameBuffer;
 - (void)renderFrame;
 - (NSMutableDictionary *)rowStateWithGlyph:(NSString *)glyph opacity:(CGFloat)opacity age:(NSTimeInterval)age;
@@ -273,13 +274,14 @@ static const CGFloat kMinimumVisibleOpacity = 0.02;
 
 - (NSMutableDictionary *)buildColumnAtX:(CGFloat)x
 {
+    CGFloat baseSpeed = SSRandomFloatBetween(50.0, 120.0) * (self.characterHeight / 18.0);
+    NSTimeInterval fadeDuration = [self fadeDurationForBaseSpeed:baseSpeed];
+    NSTimeInterval spawnInterval = MAX(0.03, self.characterHeight / baseSpeed);
+
     NSMutableArray<NSMutableDictionary *> *rows = [NSMutableArray arrayWithCapacity:self.rowsPerColumn];
     for (NSInteger rowIndex = 0; rowIndex < self.rowsPerColumn; rowIndex++) {
-        [rows addObject:[self rowStateWithGlyph:[self randomGlyph] opacity:0 age:kGlyphFadeDuration]];
+        [rows addObject:[self rowStateWithGlyph:[self randomGlyph] opacity:0 age:fadeDuration]];
     }
-
-    CGFloat baseSpeed = SSRandomFloatBetween(50.0, 120.0) * (self.characterHeight / 18.0);
-    NSTimeInterval spawnInterval = MAX(0.03, self.characterHeight / baseSpeed);
 
     NSMutableDictionary *column = [@{
         @"rows" : rows,
@@ -288,6 +290,8 @@ static const CGFloat kMinimumVisibleOpacity = 0.02;
         @"spawnInterval" : @(spawnInterval),
         @"headGlyphDwell" : @([self randomHeadGlyphDwellTime]),
         @"headGlyphDwellAccumulator" : @(0),
+        @"baseSpeed" : @(baseSpeed),
+        @"fadeDuration" : @(fadeDuration),
         @"x" : @(x)
     } mutableCopy];
 
@@ -490,6 +494,10 @@ static const CGFloat kMinimumVisibleOpacity = 0.02;
         NSTimeInterval headGlyphDwell = [column[@"headGlyphDwell"] doubleValue];
         NSTimeInterval headGlyphDwellAccumulator = [column[@"headGlyphDwellAccumulator"] doubleValue] + delta;
         NSInteger headIndex = [column[@"headIndex"] integerValue];
+        NSTimeInterval fadeDuration = [column[@"fadeDuration"] doubleValue];
+        if (fadeDuration <= 0) {
+            fadeDuration = kGlyphFadeDuration;
+        }
 
         while (spawnAccumulator >= spawnInterval) {
             spawnAccumulator -= spawnInterval;
@@ -522,12 +530,12 @@ static const CGFloat kMinimumVisibleOpacity = 0.02;
             rowState[@"dwellDuration"] = @(dwellDuration);
 
             if (opacity <= 0.0) {
-                rowState[@"age"] = @(MIN(age + delta, kGlyphFadeDuration));
+                rowState[@"age"] = @(MIN(age + delta, fadeDuration));
                 continue;
             }
 
             age += delta;
-            opacity = MAX(0.0, 1.0 - (age / kGlyphFadeDuration));
+            opacity = MAX(0.0, 1.0 - (age / fadeDuration));
             rowState[@"age"] = @(age);
             rowState[@"opacity"] = @(opacity);
         }
@@ -552,6 +560,18 @@ static const CGFloat kMinimumVisibleOpacity = 0.02;
 - (NSTimeInterval)randomRowGlyphDwellTime
 {
     return SSRandomFloatBetween(1.0, 2.0);
+}
+
+- (NSTimeInterval)fadeDurationForBaseSpeed:(CGFloat)baseSpeed
+{
+    if (baseSpeed <= 0) {
+        return kGlyphFadeDuration;
+    }
+
+    CGFloat referenceSpeed = 85.0 * (self.characterHeight / 18.0);
+    NSTimeInterval scaledFade = kGlyphFadeDuration * (referenceSpeed / baseSpeed);
+
+    return MAX(0.9, MIN(scaledFade, kGlyphFadeDuration * 1.6));
 }
 
 - (void)updateBackingScaleFactor
