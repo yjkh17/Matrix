@@ -17,7 +17,6 @@
 
 @property (nonatomic, assign) CGFloat characterWidth;
 @property (nonatomic, assign) CGFloat characterHeight;
-@property (nonatomic, assign) CGFloat lastWidth;
 @property (nonatomic, assign) NSTimeInterval lastFrameTimestamp;
 @property (nonatomic, assign) NSInteger rowsPerColumn;
 
@@ -29,9 +28,12 @@
 @property (nonatomic, assign) NSTimeInterval columnSpawnDelay;
 @property (nonatomic, assign) NSInteger fadeLength;
 @property (nonatomic, strong) NSShadow *headGlowShadow;
+@property (nonatomic, strong) NSImage *frameBuffer;
 
 - (void)resetColumns;
 - (NSString *)randomGlyph;
+- (void)ensureFrameBuffer;
+- (void)renderFrame;
 
 @end
 
@@ -69,7 +71,6 @@
                        @"F", @"G", @"H", @"I", @"J", @"K", @"L", @"M", @"N", @"O",
                        @"P", @"Q", @"R", @"S", @"T", @"U", @"V", @"W", @"X", @"Y", @"Z" ];
 
-        self.lastWidth = frame.size.width;
         self.lastFrameTimestamp = 0;
         self.wantsLayer = YES;
         [self updateBackingScaleFactor];
@@ -85,6 +86,7 @@
 - (void)startAnimation
 {
     [super startAnimation];
+    [self ensureFrameBuffer];
     [self resetColumns];
 }
 
@@ -101,57 +103,13 @@
 
 - (void)drawRect:(NSRect)rect
 {
-    [super drawRect:rect];
+    [self ensureFrameBuffer];
 
-    CGFloat widthDelta = fabs(self.bounds.size.width - self.lastWidth);
-    if (widthDelta > (self.characterWidth * 1.5)) {
-        [self resetColumns];
-    }
-
-    NSColor *backgroundTint = [NSColor colorWithCalibratedRed:0.02 green:0.08 blue:0.05 alpha:0.18];
-    [backgroundTint set];
-    NSRectFill(rect);
-
-    for (NSInteger columnIndex = 0; columnIndex < self.columns.count; columnIndex++) {
-        NSMutableDictionary *column = self.columns[columnIndex];
-        NSMutableArray<NSString *> *glyphs = column[@"glyphs"];
-        CGFloat offset = [column[@"offset"] doubleValue];
-
-        NSInteger rows = glyphs.count;
-        CGFloat x = [column[@"x"] doubleValue];
-        BOOL thick = [column[@"thick"] boolValue];
-        CGFloat jitter = [column[@"xJitter"] doubleValue];
-        CGFloat altOffset = [column[@"altXOffset"] doubleValue];
-
-        for (NSInteger row = 0; row < rows; row++) {
-            CGFloat y = self.bounds.size.height - ((row + 1) * self.characterHeight) + offset;
-
-            if (y > self.bounds.size.height + self.characterHeight) {
-                continue;
-            }
-
-            if (y < -self.characterHeight) {
-                break;
-            }
-
-            NSString *glyph = glyphs[row];
-            NSDictionary *attributes = [self attributesForRow:row];
-
-            if (row == 0) {
-                [self drawHeadGlyph:glyph atPoint:NSMakePoint(x + jitter, y) withAttributes:attributes];
-                if (thick) {
-                    CGFloat altX = x + jitter + altOffset;
-                    [self drawHeadGlyph:glyph atPoint:NSMakePoint(altX, y) withAttributes:attributes];
-                }
-            } else {
-                [glyph drawAtPoint:NSMakePoint(x + jitter, y) withAttributes:attributes];
-                if (thick) {
-                    CGFloat altX = x + jitter + altOffset;
-                    [glyph drawAtPoint:NSMakePoint(altX, y) withAttributes:attributes];
-                }
-            }
-        }
-
+    if (self.frameBuffer) {
+        [self.frameBuffer drawAtPoint:NSZeroPoint fromRect:NSZeroRect operation:NSCompositingOperationSourceOver fraction:1.0];
+    } else {
+        [[NSColor blackColor] set];
+        NSRectFill(self.bounds);
     }
 }
 
@@ -161,7 +119,14 @@
     NSTimeInterval delta = self.lastFrameTimestamp > 0 ? now - self.lastFrameTimestamp : 1.0 / 30.0;
     self.lastFrameTimestamp = now;
 
+    [self ensureFrameBuffer];
+    if (!self.frameBuffer) {
+        return;
+    }
+
     [self updateColumnsWithDeltaTime:delta];
+
+    [self renderFrame];
 
     [super animateOneFrame];
     [self setNeedsDisplay:YES];
@@ -180,7 +145,7 @@
 - (void)resetColumns
 {
     CGFloat width = self.bounds.size.width;
-    self.lastWidth = width;
+    CGFloat height = self.bounds.size.height;
 
     CGFloat minGap = self.characterWidth * 0.55;
     CGFloat maxGap = self.characterWidth * 1.45;
@@ -195,7 +160,7 @@
     NSInteger columnCount = positions.count;
     self.columnPositions = positions;
 
-    self.rowsPerColumn = (NSInteger)(self.bounds.size.height / self.characterHeight) + self.fadeLength + 4;
+    self.rowsPerColumn = (NSInteger)(height / self.characterHeight) + self.fadeLength + 4;
 
     self.columns = [NSMutableArray arrayWithCapacity:columnCount];
     self.nextColumnIndex = 0;
@@ -218,6 +183,26 @@
 - (NSTimeInterval)randomColumnSpawnDelay
 {
     return SSRandomFloatBetween(0.05, 0.22);
+}
+
+- (void)ensureFrameBuffer
+{
+    NSSize currentSize = self.bounds.size;
+    if (currentSize.width <= 0 || currentSize.height <= 0) {
+        self.frameBuffer = nil;
+        return;
+    }
+
+    BOOL sizeChanged = !NSEqualSizes(self.frameBuffer.size, currentSize);
+
+    if (!self.frameBuffer || sizeChanged) {
+        self.frameBuffer = [[NSImage alloc] initWithSize:currentSize];
+        [self.frameBuffer lockFocus];
+        [[NSColor blackColor] set];
+        NSRectFill(NSMakeRect(0, 0, currentSize.width, currentSize.height));
+        [self.frameBuffer unlockFocus];
+        [self resetColumns];
+    }
 }
 
 - (NSMutableDictionary *)buildColumnAtX:(CGFloat)x
@@ -251,6 +236,69 @@
     CGFloat x = [self.columnPositions[self.nextColumnIndex] doubleValue];
     [self.columns addObject:[self buildColumnAtX:x]];
     self.nextColumnIndex += 1;
+}
+
+- (void)renderFrame
+{
+    if (!self.frameBuffer) {
+        return;
+    }
+
+    [self.frameBuffer lockFocus];
+
+    NSRect imageRect = NSMakeRect(0, 0, self.frameBuffer.size.width, self.frameBuffer.size.height);
+
+    [[NSColor colorWithCalibratedWhite:0.0 alpha:0.14] set];
+    NSRectFillUsingOperation(imageRect, NSCompositingOperationSourceOver);
+
+    [[NSColor colorWithCalibratedRed:0.02 green:0.08 blue:0.05 alpha:0.06] set];
+    NSRectFillUsingOperation(imageRect, NSCompositingOperationSourceOver);
+
+    CGFloat bufferHeight = self.frameBuffer.size.height;
+
+    for (NSInteger columnIndex = 0; columnIndex < self.columns.count; columnIndex++) {
+        NSMutableDictionary *column = self.columns[columnIndex];
+        NSMutableArray<NSString *> *glyphs = column[@"glyphs"];
+        CGFloat offset = [column[@"offset"] doubleValue];
+
+        NSInteger rows = glyphs.count;
+        CGFloat x = [column[@"x"] doubleValue];
+        BOOL thick = [column[@"thick"] boolValue];
+        CGFloat jitter = [column[@"xJitter"] doubleValue];
+        CGFloat altOffset = [column[@"altXOffset"] doubleValue];
+
+        for (NSInteger row = 0; row < rows; row++) {
+            CGFloat y = bufferHeight - ((row + 1) * self.characterHeight) + offset;
+
+            if (y > bufferHeight + self.characterHeight) {
+                continue;
+            }
+
+            if (y < -self.characterHeight) {
+                break;
+            }
+
+            NSString *glyph = glyphs[row];
+            NSDictionary *attributes = [self attributesForRow:row];
+
+            if (row == 0) {
+                [self drawHeadGlyph:glyph atPoint:NSMakePoint(x + jitter, y) withAttributes:attributes];
+                if (thick) {
+                    CGFloat altX = x + jitter + altOffset;
+                    [self drawHeadGlyph:glyph atPoint:NSMakePoint(altX, y) withAttributes:attributes];
+                }
+            } else {
+                [glyph drawAtPoint:NSMakePoint(x + jitter, y) withAttributes:attributes];
+                if (thick) {
+                    CGFloat altX = x + jitter + altOffset;
+                    [glyph drawAtPoint:NSMakePoint(altX, y) withAttributes:attributes];
+                }
+            }
+        }
+
+    }
+
+    [self.frameBuffer unlockFocus];
 }
 
 - (void)spawnColumnsWithDeltaTime:(NSTimeInterval)delta
