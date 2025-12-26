@@ -32,6 +32,7 @@
 
 - (void)resetColumns;
 - (NSString *)randomGlyph;
+- (NSArray<NSDictionary<NSAttributedStringKey, id> *> *)buildFadeAttributesWithLength:(NSInteger)length;
 - (void)ensureFrameBuffer;
 - (void)renderFrame;
 
@@ -147,20 +148,28 @@
     CGFloat width = self.bounds.size.width;
     CGFloat height = self.bounds.size.height;
 
-    CGFloat minGap = self.characterWidth * 0.55;
-    CGFloat maxGap = self.characterWidth * 1.45;
+    CGFloat minGap = self.characterWidth * 0.15;
+    CGFloat maxGap = self.characterWidth * 1.1;
 
-    CGFloat startX = SSRandomFloatBetween(self.characterWidth * 0.2, self.characterWidth * 1.5);
+    CGFloat startX = SSRandomFloatBetween(self.characterWidth * 0.1, self.characterWidth * 1.0);
     NSMutableArray<NSNumber *> *positions = [NSMutableArray array];
-    while (startX < width - self.characterWidth) {
+    while (startX < width - self.characterWidth * 0.3) {
         [positions addObject:@(startX)];
-        startX += SSRandomFloatBetween(minGap, maxGap);
+        CGFloat gap = SSRandomFloatBetween(minGap, maxGap);
+
+        if (SSRandomIntBetween(0, 7) == 0) {
+            CGFloat overlapAdjustment = self.characterWidth * SSRandomFloatBetween(0.1, 0.65);
+            gap = MAX(self.characterWidth * 0.08, gap - overlapAdjustment);
+        }
+
+        startX += gap;
     }
 
     NSInteger columnCount = positions.count;
     self.columnPositions = positions;
 
-    self.rowsPerColumn = (NSInteger)(height / self.characterHeight) + self.fadeLength + 4;
+    NSInteger maxFadeLength = self.fadeLength + 8;
+    self.rowsPerColumn = (NSInteger)(height / self.characterHeight) + maxFadeLength + 6;
 
     self.columns = [NSMutableArray arrayWithCapacity:columnCount];
     self.nextColumnIndex = 0;
@@ -182,7 +191,7 @@
 
 - (NSTimeInterval)randomColumnSpawnDelay
 {
-    return SSRandomFloatBetween(0.05, 0.22);
+    return SSRandomFloatBetween(0.03, 0.16);
 }
 
 - (void)ensureFrameBuffer
@@ -213,7 +222,13 @@
         [glyphs addObject:[self randomGlyph]];
     }
 
-    CGFloat baseSpeed = SSRandomFloatBetween(60.0, 180.0) * (self.characterHeight / 18.0);
+    CGFloat baseSpeed = SSRandomFloatBetween(28.0, 260.0) * (self.characterHeight / 18.0);
+    if (SSRandomIntBetween(0, 4) == 0) {
+        baseSpeed *= SSRandomFloatBetween(0.45, 0.85);
+    }
+
+    NSInteger fadeLength = MAX(4, self.fadeLength + SSRandomIntBetween(-6, 8));
+    NSArray<NSDictionary<NSAttributedStringKey, id> *> *fadeAttributes = [self buildFadeAttributesWithLength:fadeLength];
 
     NSMutableDictionary *column = [@{
         @"glyphs" : glyphs,
@@ -222,7 +237,9 @@
         @"x" : @(x),
         @"thick" : @(SSRandomIntBetween(0, 4) == 0),
         @"xJitter" : @(SSRandomFloatBetween(-0.8, 0.8)),
-        @"altXOffset" : @(SSRandomFloatBetween(-2.0, 2.0))
+        @"altXOffset" : @(SSRandomFloatBetween(-2.0, 2.0)),
+        @"fadeLength" : @(fadeLength),
+        @"fadeAttributes" : fadeAttributes
     } mutableCopy];
 
     return column;
@@ -277,7 +294,7 @@
             }
 
             NSString *glyph = glyphs[row];
-            NSDictionary *attributes = [self attributesForRow:row];
+            NSDictionary *attributes = [self attributesForRow:row inColumn:column];
 
             if (!attributes) {
                 continue;
@@ -318,7 +335,7 @@
     }
 }
 
-- (NSDictionary<NSAttributedStringKey, id> *)attributesForRow:(NSInteger)row
+- (NSDictionary<NSAttributedStringKey, id> *)attributesForRow:(NSInteger)row inColumn:(NSDictionary *)column
 {
     if (row == 0) {
         return self.headAttributes;
@@ -326,12 +343,15 @@
 
     NSInteger fadeIndex = row - 1;
 
-    if (fadeIndex > self.fadeLength) {
+    NSInteger columnFadeLength = [column[@"fadeLength"] integerValue];
+    NSArray<NSDictionary<NSAttributedStringKey, id> *> *columnFadeAttributes = column[@"fadeAttributes"] ?: self.fadeAttributes;
+
+    if (fadeIndex > columnFadeLength) {
         return nil;
     }
 
-    NSInteger clampedIndex = MIN((NSInteger)self.fadeAttributes.count - 1, MAX(0, fadeIndex));
-    return self.fadeAttributes[clampedIndex];
+    NSInteger clampedIndex = MIN((NSInteger)columnFadeAttributes.count - 1, MAX(0, fadeIndex));
+    return columnFadeAttributes[clampedIndex];
 }
 
 - (void)drawHeadGlyph:(NSString *)glyph atPoint:(NSPoint)point withAttributes:(NSDictionary<NSAttributedStringKey, id> *)attributes
@@ -424,11 +444,16 @@
 
 - (void)rebuildFadeAttributes
 {
-    NSMutableArray<NSDictionary<NSAttributedStringKey, id> *> *attributes = [NSMutableArray arrayWithCapacity:self.fadeLength + 1];
+    self.fadeAttributes = [self buildFadeAttributesWithLength:self.fadeLength];
+}
+
+- (NSArray<NSDictionary<NSAttributedStringKey, id> *> *)buildFadeAttributesWithLength:(NSInteger)length
+{
+    NSMutableArray<NSDictionary<NSAttributedStringKey, id> *> *attributes = [NSMutableArray arrayWithCapacity:length + 1];
     NSColor *baseTrailColor = self.glyphAttributes[NSForegroundColorAttributeName];
 
-    for (NSInteger fadeIndex = 0; fadeIndex <= self.fadeLength; fadeIndex++) {
-        CGFloat fadeProgress = MIN(1.0, fadeIndex / (CGFloat)self.fadeLength);
+    for (NSInteger fadeIndex = 0; fadeIndex <= length; fadeIndex++) {
+        CGFloat fadeProgress = MIN(1.0, fadeIndex / (CGFloat)length);
         CGFloat alphaFactor = pow((1.0 - fadeProgress), 2.2) * 0.9 + 0.05;
 
         NSDictionary *entry = @{ NSFontAttributeName : self.matrixFont,
@@ -436,7 +461,7 @@
         [attributes addObject:entry];
     }
 
-    self.fadeAttributes = attributes;
+    return attributes;
 }
 
 - (void)updateBackingScaleFactor
