@@ -32,6 +32,7 @@ static const CGFloat kMinimumVisibleOpacity = 0.02;
 
 - (void)resetColumns;
 - (NSString *)randomGlyph;
+- (NSArray<NSString *> *)buildWeightedGlyphSet;
 - (NSTimeInterval)randomGlyphDwellTime;
 - (NSTimeInterval)randomHeadGlyphDwellTime;
 - (void)ensureFrameBuffer;
@@ -70,15 +71,7 @@ static const CGFloat kMinimumVisibleOpacity = 0.02;
                              NSForegroundColorAttributeName : primaryGreen,
                              NSShadowAttributeName : headGlow };
 
-        _glyphSet = @[ @"ｱ", @"ｲ", @"ｳ", @"ｴ", @"ｵ", @"ｶ", @"ｷ", @"ｸ", @"ｹ", @"ｺ",
-                       @"ｻ", @"ｼ", @"ｽ", @"ｾ", @"ｿ", @"ﾀ", @"ﾁ", @"ﾂ", @"ﾃ", @"ﾄ",
-                       @"ﾅ", @"ﾆ", @"ﾇ", @"ﾈ", @"ﾉ", @"ﾊ", @"ﾋ", @"ﾌ", @"ﾍ", @"ﾎ",
-                       @"ﾏ", @"ﾐ", @"ﾑ", @"ﾒ", @"ﾓ", @"ﾔ", @"ﾕ", @"ﾖ", @"ﾗ", @"ﾘ",
-                       @"ﾙ", @"ﾚ", @"ﾛ", @"ﾜ", @"ﾝ", @"ｧ", @"ｨ", @"ｩ", @"ｪ", @"ｫ",
-                       @"ｯ", @"ｰ", @"0", @"1", @"2", @"3", @"4", @"5", @"6", @"7",
-                       @"8", @"9", @"0", @"1", @"2", @"3", @"4", @"5", @"6", @"7",
-                       @"8", @"9", @"＋", @"－", @"＝", @"＊", @"／", @"・", @"･", @"◎",
-                       @"◇", @"◆", @"○", @"●", @"|", @"¦" ];
+        _glyphSet = [self buildWeightedGlyphSet];
 
         self.lastFrameTimestamp = 0;
         self.wantsLayer = YES;
@@ -180,8 +173,49 @@ static const CGFloat kMinimumVisibleOpacity = 0.02;
 
 - (NSString *)randomGlyph
 {
+    if (self.glyphSet.count == 0) {
+        return @"";
+    }
+
     NSUInteger index = arc4random_uniform((uint32_t)self.glyphSet.count);
     return self.glyphSet[index];
+}
+
+- (NSArray<NSString *> *)buildWeightedGlyphSet
+{
+    NSArray<NSString *> *primaryKatakana = @[ @"ｱ", @"ｲ", @"ｳ", @"ｴ", @"ｵ", @"ｶ", @"ｷ", @"ｸ", @"ｹ", @"ｺ",
+                                              @"ｻ", @"ｼ", @"ｽ", @"ｾ", @"ｿ", @"ﾀ", @"ﾁ", @"ﾂ", @"ﾃ", @"ﾄ",
+                                              @"ﾅ", @"ﾆ", @"ﾇ", @"ﾈ", @"ﾉ", @"ﾊ", @"ﾋ", @"ﾌ", @"ﾍ", @"ﾎ",
+                                              @"ﾏ", @"ﾐ", @"ﾑ", @"ﾒ", @"ﾓ", @"ﾔ", @"ﾕ", @"ﾖ", @"ﾗ", @"ﾘ",
+                                              @"ﾙ", @"ﾚ", @"ﾛ", @"ﾜ", @"ﾝ" ];
+
+    NSArray<NSString *> *smallKatakana = @[ @"ｧ", @"ｨ", @"ｩ", @"ｪ", @"ｫ", @"ｯ", @"ｰ" ];
+    NSArray<NSString *> *numerals = @[ @"0", @"1", @"2", @"3", @"4", @"5", @"7", @"8", @"9" ];
+    NSArray<NSString *> *punctuation = @[ @"＋", @"－", @"＝", @"＊", @"／", @"・", @"･", @"◎", @"◇", @"◆", @"○", @"●", @"|", @"¦" ];
+
+    NSMutableArray<NSString *> *weightedGlyphs = [NSMutableArray array];
+
+    void (^appendGlyphs)(NSArray<NSString *> *, NSInteger) = ^(NSArray<NSString *> *glyphs, NSInteger weight) {
+        if (weight <= 0) {
+            return;
+        }
+
+        for (NSString *glyph in glyphs) {
+            for (NSInteger index = 0; index < weight; index++) {
+                [weightedGlyphs addObject:glyph];
+            }
+        }
+    };
+
+    // The weights below mirror the observed frequency of glyph families in the source material.
+    appendGlyphs(primaryKatakana, 6);   // Dominant katakana stream characters.
+    appendGlyphs(smallKatakana, 3);     // Less frequent small kana and prolonged sound mark.
+    appendGlyphs(@[ @"日" ], 5);       // Standout kanji seen regularly in the rain.
+    appendGlyphs(@[ @"Z" ], 2);        // Occasional Latin glyphs.
+    appendGlyphs(numerals, 4);          // Numerals (notably excluding 6).
+    appendGlyphs(punctuation, 1);       // Sparse punctuation and symbols.
+
+    return weightedGlyphs;
 }
 
 - (NSTimeInterval)randomColumnSpawnDelay
