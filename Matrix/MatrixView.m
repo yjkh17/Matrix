@@ -470,8 +470,16 @@
         return;
     }
 
-    CGFloat scale = self.window.backingScaleFactor ?: NSScreen.mainScreen.backingScaleFactor;
-    self.layer.contentsScale = scale;
+    CGFloat scale = 1.0;
+    if (self.window) {
+        scale = self.window.backingScaleFactor ?: scale;
+    } else if (NSScreen.mainScreen) {
+        scale = NSScreen.mainScreen.backingScaleFactor ?: scale;
+    }
+
+    // Some preview contexts provide no backing scale factor; fall back to a sane default
+    // so the layer still renders instead of ending up with a zero contentsScale.
+    self.layer.contentsScale = MAX(1.0, scale);
 }
 
 @end
