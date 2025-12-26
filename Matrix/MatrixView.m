@@ -8,6 +8,33 @@
 #import "MatrixView.h"
 #import <math.h>
 
+@interface MatrixView ()
+
+@property (nonatomic, strong) NSFont *matrixFont;
+@property (nonatomic, strong) NSDictionary<NSAttributedStringKey, id> *glyphAttributes;
+@property (nonatomic, strong) NSDictionary<NSAttributedStringKey, id> *headAttributes;
+@property (nonatomic, strong) NSArray<NSDictionary<NSAttributedStringKey, id> *> *fadeAttributes;
+
+@property (nonatomic, assign) CGFloat characterWidth;
+@property (nonatomic, assign) CGFloat characterHeight;
+@property (nonatomic, assign) CGFloat lastWidth;
+@property (nonatomic, assign) NSTimeInterval lastFrameTimestamp;
+@property (nonatomic, assign) NSInteger rowsPerColumn;
+
+@property (nonatomic, strong) NSArray<NSString *> *glyphSet;
+@property (nonatomic, strong) NSMutableArray<NSMutableDictionary *> *columns;
+@property (nonatomic, strong) NSArray<NSNumber *> *columnPositions;
+@property (nonatomic, assign) NSInteger nextColumnIndex;
+@property (nonatomic, assign) NSTimeInterval columnSpawnAccumulator;
+@property (nonatomic, assign) NSTimeInterval columnSpawnDelay;
+@property (nonatomic, assign) NSInteger fadeLength;
+@property (nonatomic, strong) NSShadow *headGlowShadow;
+
+- (void)resetColumns;
+- (NSString *)randomGlyph;
+
+@end
+
 @implementation MatrixView
 
 - (instancetype)initWithFrame:(NSRect)frame isPreview:(BOOL)isPreview
@@ -47,6 +74,10 @@
         self.wantsLayer = YES;
         [self updateBackingScaleFactor];
         [self resetColumns];
+
+        _headGlowShadow = [[NSShadow alloc] init];
+        _headGlowShadow.shadowBlurRadius = 14.0;
+        _headGlowShadow.shadowOffset = NSZeroSize;
     }
     return self;
 }
@@ -73,28 +104,24 @@
     [super drawRect:rect];
 
     CGFloat widthDelta = fabs(self.bounds.size.width - self.lastWidth);
-    NSInteger expectedColumns = MAX(1, (NSInteger)(self.bounds.size.width / self.characterWidth));
-    if (expectedColumns != self.columnCount || widthDelta > self.characterWidth) {
+    if (widthDelta > (self.characterWidth * 1.5)) {
         [self resetColumns];
     }
 
-    NSColor *backgroundTint = [NSColor colorWithCalibratedRed:0.02 green:0.08 blue:0.05 alpha:1.0];
+    NSColor *backgroundTint = [NSColor colorWithCalibratedRed:0.02 green:0.08 blue:0.05 alpha:0.18];
     [backgroundTint set];
-    NSRectFill(rect);
-
-    NSColor *haze = [NSColor colorWithCalibratedRed:0.0 green:0.22 blue:0.13 alpha:0.08];
-    [haze set];
     NSRectFill(rect);
 
     for (NSInteger columnIndex = 0; columnIndex < self.columns.count; columnIndex++) {
         NSMutableDictionary *column = self.columns[columnIndex];
         NSMutableArray<NSString *> *glyphs = column[@"glyphs"];
         CGFloat offset = [column[@"offset"] doubleValue];
-        
+
         NSInteger rows = glyphs.count;
         CGFloat x = [column[@"x"] doubleValue];
         BOOL thick = [column[@"thick"] boolValue];
         CGFloat jitter = [column[@"xJitter"] doubleValue];
+        CGFloat altOffset = [column[@"altXOffset"] doubleValue];
 
         for (NSInteger row = 0; row < rows; row++) {
             CGFloat y = self.bounds.size.height - ((row + 1) * self.characterHeight) + offset;
@@ -113,19 +140,18 @@
             if (row == 0) {
                 [self drawHeadGlyph:glyph atPoint:NSMakePoint(x + jitter, y) withAttributes:attributes];
                 if (thick) {
-                    CGFloat altX = x + jitter + SSRandomFloatBetween(-2.0, 2.0);
+                    CGFloat altX = x + jitter + altOffset;
                     [self drawHeadGlyph:glyph atPoint:NSMakePoint(altX, y) withAttributes:attributes];
                 }
             } else {
                 [glyph drawAtPoint:NSMakePoint(x + jitter, y) withAttributes:attributes];
                 if (thick) {
-                    CGFloat altX = x + jitter + SSRandomFloatBetween(-2.0, 2.0);
+                    CGFloat altX = x + jitter + altOffset;
                     [glyph drawAtPoint:NSMakePoint(altX, y) withAttributes:attributes];
                 }
             }
         }
 
-        column[@"xJitter"] = @(jitter);
     }
 }
 
@@ -166,17 +192,17 @@
         startX += SSRandomFloatBetween(minGap, maxGap);
     }
 
-    self.columnCount = positions.count;
+    NSInteger columnCount = positions.count;
     self.columnPositions = positions;
 
     self.rowsPerColumn = (NSInteger)(self.bounds.size.height / self.characterHeight) + self.fadeLength + 4;
 
-    self.columns = [NSMutableArray arrayWithCapacity:self.columnCount];
+    self.columns = [NSMutableArray arrayWithCapacity:columnCount];
     self.nextColumnIndex = 0;
     self.columnSpawnAccumulator = 0;
     self.columnSpawnDelay = [self randomColumnSpawnDelay];
 
-    if (self.columnCount > 0) {
+    if (columnCount > 0) {
         [self addNextColumn];
     }
 
@@ -209,7 +235,8 @@
         @"speed" : @(baseSpeed),
         @"x" : @(x),
         @"thick" : @(SSRandomIntBetween(0, 4) == 0),
-        @"xJitter" : @(SSRandomFloatBetween(-0.8, 0.8))
+        @"xJitter" : @(SSRandomFloatBetween(-0.8, 0.8)),
+        @"altXOffset" : @(SSRandomFloatBetween(-2.0, 2.0))
     } mutableCopy];
 
     return column;
@@ -256,11 +283,8 @@
     NSColor *headColor = attributes[NSForegroundColorAttributeName];
 
     [NSGraphicsContext saveGraphicsState];
-    NSShadow *glow = [[NSShadow alloc] init];
-    glow.shadowBlurRadius = 14.0;
-    glow.shadowOffset = NSZeroSize;
-    glow.shadowColor = [headColor colorWithAlphaComponent:0.85];
-    [glow set];
+    self.headGlowShadow.shadowColor = [headColor colorWithAlphaComponent:0.85];
+    [self.headGlowShadow set];
     [glyph drawAtPoint:point withAttributes:attributes];
     [NSGraphicsContext restoreGraphicsState];
 
