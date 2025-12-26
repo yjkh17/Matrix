@@ -20,7 +20,7 @@
 
         NSDictionary *sizingAttributes = @{ NSFontAttributeName : _matrixFont };
         _characterWidth = [@"0" sizeWithAttributes:sizingAttributes].width + 1.0;
-        _characterHeight = _matrixFont.capHeight + 6.0;
+        _characterHeight = _matrixFont.ascender - _matrixFont.descender + _matrixFont.leading;
 
         _fadeLength = isPreview ? 10 : 18;
 
@@ -42,9 +42,10 @@
                        @"F", @"G", @"H", @"I", @"J", @"K", @"L", @"M", @"N", @"O",
                        @"P", @"Q", @"R", @"S", @"T", @"U", @"V", @"W", @"X", @"Y", @"Z" ];
 
-        self.wantsLayer = YES;
-        self.layer.backgroundColor = NSColor.blackColor.CGColor;
         self.lastWidth = frame.size.width;
+        self.lastFrameTimestamp = 0;
+        self.wantsLayer = YES;
+        [self updateBackingScaleFactor];
         [self resetColumns];
     }
     return self;
@@ -59,6 +60,12 @@
 - (void)stopAnimation
 {
     [super stopAnimation];
+}
+
+- (void)viewDidMoveToWindow
+{
+    [super viewDidMoveToWindow];
+    [self updateBackingScaleFactor];
 }
 
 - (void)drawRect:(NSRect)rect
@@ -83,21 +90,21 @@
         NSMutableDictionary *column = self.columns[columnIndex];
         NSMutableArray<NSString *> *glyphs = column[@"glyphs"];
         CGFloat offset = [column[@"offset"] doubleValue];
-        CGFloat speed = [column[@"speed"] doubleValue];
-
+        
         NSInteger rows = glyphs.count;
         CGFloat x = [column[@"x"] doubleValue];
         BOOL thick = [column[@"thick"] boolValue];
         CGFloat jitter = [column[@"xJitter"] doubleValue];
 
-        jitter = MIN(MAX(jitter + SSRandomFloatBetween(-0.1, 0.1), -1.25), 1.25);
-        column[@"xJitter"] = @(jitter);
-
         for (NSInteger row = 0; row < rows; row++) {
             CGFloat y = self.bounds.size.height - ((row + 1) * self.characterHeight) + offset;
 
-            if (y < -self.characterHeight || y > self.bounds.size.height + self.characterHeight) {
+            if (y > self.bounds.size.height + self.characterHeight) {
                 continue;
+            }
+
+            if (y < -self.characterHeight) {
+                break;
             }
 
             NSString *glyph = glyphs[row];
@@ -118,21 +125,20 @@
             }
         }
 
-        offset += speed;
-
-        if (offset >= self.characterHeight) {
-            offset -= self.characterHeight;
-            [glyphs insertObject:[self randomGlyph] atIndex:0];
-            [glyphs removeLastObject];
-        }
-
-        column[@"offset"] = @(offset);
+        column[@"xJitter"] = @(jitter);
     }
 }
 
 - (void)animateOneFrame
 {
-        [self setNeedsDisplay:YES];
+    NSTimeInterval now = [NSDate timeIntervalSinceReferenceDate];
+    NSTimeInterval delta = self.lastFrameTimestamp > 0 ? now - self.lastFrameTimestamp : 1.0 / 30.0;
+    self.lastFrameTimestamp = now;
+
+    [self updateColumnsWithDeltaTime:delta];
+
+    [super animateOneFrame];
+    [self setNeedsDisplay:YES];
 }
 
 - (BOOL)hasConfigureSheet
@@ -172,7 +178,7 @@
             [glyphs addObject:[self randomGlyph]];
         }
 
-        CGFloat baseSpeed = SSRandomFloatBetween(2.0, 6.0) * (self.characterHeight / 18.0);
+        CGFloat baseSpeed = SSRandomFloatBetween(60.0, 180.0) * (self.characterHeight / 18.0);
 
         NSMutableDictionary *column = [@{
             @"glyphs" : glyphs,
@@ -185,6 +191,8 @@
 
         [self.columns addObject:column];
     }
+
+    [self rebuildFadeAttributes];
 }
 
 - (NSString *)randomGlyph
@@ -199,16 +207,8 @@
         return self.headAttributes;
     }
 
-    NSMutableDictionary<NSAttributedStringKey, id> *attributes = [self.glyphAttributes mutableCopy];
-
-    NSColor *baseTrailColor = self.glyphAttributes[NSForegroundColorAttributeName];
-    CGFloat relativeFadeIndex = MAX(0, row - 1);
-    CGFloat fadeProgress = MIN(1.0, relativeFadeIndex / (CGFloat)self.fadeLength);
-    CGFloat alphaFactor = pow((1.0 - fadeProgress), 2.2) * 0.9 + 0.05;
-
-    attributes[NSForegroundColorAttributeName] = [baseTrailColor colorWithAlphaComponent:(baseTrailColor.alphaComponent * alphaFactor)];
-
-    return attributes;
+    NSInteger index = MIN((NSInteger)self.fadeAttributes.count - 1, MAX(0, row - 1));
+    return self.fadeAttributes[index];
 }
 
 - (void)drawHeadGlyph:(NSString *)glyph atPoint:(NSPoint)point withAttributes:(NSDictionary<NSAttributedStringKey, id> *)attributes
@@ -230,6 +230,60 @@
     };
 
     [glyph drawAtPoint:point withAttributes:punchAttributes];
+}
+
+- (void)updateColumnsWithDeltaTime:(NSTimeInterval)delta
+{
+    if (delta <= 0) {
+        return;
+    }
+
+    for (NSMutableDictionary *column in self.columns) {
+        CGFloat offset = [column[@"offset"] doubleValue];
+        CGFloat speed = [column[@"speed"] doubleValue];
+        NSMutableArray<NSString *> *glyphs = column[@"glyphs"];
+
+        offset += speed * delta;
+
+        while (offset >= self.characterHeight) {
+            offset -= self.characterHeight;
+            [glyphs insertObject:[self randomGlyph] atIndex:0];
+            [glyphs removeLastObject];
+        }
+
+        CGFloat jitter = [column[@"xJitter"] doubleValue];
+        jitter = MIN(MAX(jitter + SSRandomFloatBetween(-0.1, 0.1), -1.25), 1.25);
+
+        column[@"offset"] = @(offset);
+        column[@"xJitter"] = @(jitter);
+    }
+}
+
+- (void)rebuildFadeAttributes
+{
+    NSMutableArray<NSDictionary<NSAttributedStringKey, id> *> *attributes = [NSMutableArray arrayWithCapacity:self.fadeLength + 1];
+    NSColor *baseTrailColor = self.glyphAttributes[NSForegroundColorAttributeName];
+
+    for (NSInteger fadeIndex = 0; fadeIndex <= self.fadeLength; fadeIndex++) {
+        CGFloat fadeProgress = MIN(1.0, fadeIndex / (CGFloat)self.fadeLength);
+        CGFloat alphaFactor = pow((1.0 - fadeProgress), 2.2) * 0.9 + 0.05;
+
+        NSDictionary *entry = @{ NSFontAttributeName : self.matrixFont,
+                                 NSForegroundColorAttributeName : [baseTrailColor colorWithAlphaComponent:(baseTrailColor.alphaComponent * alphaFactor)] };
+        [attributes addObject:entry];
+    }
+
+    self.fadeAttributes = attributes;
+}
+
+- (void)updateBackingScaleFactor
+{
+    if (!self.wantsLayer) {
+        return;
+    }
+
+    CGFloat scale = self.window.backingScaleFactor ?: NSScreen.mainScreen.backingScaleFactor;
+    self.layer.contentsScale = scale;
 }
 
 @end

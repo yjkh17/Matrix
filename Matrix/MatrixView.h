@@ -12,11 +12,13 @@
 @property (nonatomic, strong) NSFont *matrixFont;
 @property (nonatomic, strong) NSDictionary<NSAttributedStringKey, id> *glyphAttributes;
 @property (nonatomic, strong) NSDictionary<NSAttributedStringKey, id> *headAttributes;
+@property (nonatomic, strong) NSArray<NSDictionary<NSAttributedStringKey, id> *> *fadeAttributes;
 
 @property (nonatomic, assign) CGFloat characterWidth;
 @property (nonatomic, assign) CGFloat characterHeight;
 @property (nonatomic, assign) NSInteger columnCount;
 @property (nonatomic, assign) CGFloat lastWidth;
+@property (nonatomic, assign) NSTimeInterval lastFrameTimestamp;
 
 @property (nonatomic, strong) NSArray<NSString *> *glyphSet;
 @property (nonatomic, strong) NSMutableArray<NSMutableDictionary *> *columns;
