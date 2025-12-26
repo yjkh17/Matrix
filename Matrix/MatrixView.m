@@ -35,6 +35,7 @@
 - (NSArray<NSDictionary<NSAttributedStringKey, id> *> *)buildFadeAttributesWithLength:(NSInteger)length;
 - (void)ensureFrameBuffer;
 - (void)renderFrame;
+- (void)drawGlyphTrailAtPoint:(NSPoint)point withColor:(NSColor *)color;
 
 @end
 
@@ -246,6 +247,25 @@
     return column;
 }
 
+- (void)drawGlyphTrailAtPoint:(NSPoint)point withColor:(NSColor *)color
+{
+    if (!color) {
+        return;
+    }
+
+    CGFloat streakWidth = self.characterWidth * 0.42;
+    CGFloat streakHeight = self.characterHeight * 2.2;
+
+    NSRect streakRect = NSMakeRect(point.x + (self.characterWidth - streakWidth) * 0.5,
+                                   point.y - (streakHeight - self.characterHeight) * 0.45,
+                                   streakWidth,
+                                   streakHeight);
+
+    NSGradient *trailGradient = [[NSGradient alloc] initWithStartingColor:[color colorWithAlphaComponent:MIN(1.0, color.alphaComponent) * 0.55]
+                                                             endingColor:[color colorWithAlphaComponent:0.02]];
+    [trailGradient drawInRect:streakRect angle:90.0];
+}
+
 - (void)addNextColumn
 {
     if (self.nextColumnIndex >= self.columnPositions.count) {
@@ -308,9 +328,13 @@
                     [self drawHeadGlyph:glyph atPoint:NSMakePoint(altX, y) withAttributes:attributes];
                 }
             } else {
+                NSColor *trailColor = attributes[NSForegroundColorAttributeName];
+
+                [self drawGlyphTrailAtPoint:NSMakePoint(x + jitter, y) withColor:trailColor];
                 [glyph drawAtPoint:NSMakePoint(x + jitter, y) withAttributes:attributes];
                 if (thick) {
                     CGFloat altX = x + jitter + altOffset;
+                    [self drawGlyphTrailAtPoint:NSMakePoint(altX, y) withColor:trailColor];
                     [glyph drawAtPoint:NSMakePoint(altX, y) withAttributes:attributes];
                 }
             }
