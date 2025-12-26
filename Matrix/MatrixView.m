@@ -16,6 +16,8 @@ static const CGFloat kMinimumVisibleOpacity = 0.02;
 @property (nonatomic, strong) NSFont *matrixFont;
 @property (nonatomic, strong) NSDictionary<NSAttributedStringKey, id> *glyphAttributes;
 @property (nonatomic, strong) NSDictionary<NSAttributedStringKey, id> *headAttributes;
+@property (nonatomic, strong) NSDictionary<NSAttributedStringKey, id> *tailGlowAttributes;
+@property (nonatomic, strong) NSDictionary<NSAttributedStringKey, id> *tailDimAttributes;
 
 @property (nonatomic, assign) CGFloat characterWidth;
 @property (nonatomic, assign) CGFloat characterHeight;
@@ -58,6 +60,8 @@ static const CGFloat kMinimumVisibleOpacity = 0.02;
 
         NSColor *primaryGreen = [NSColor colorWithCalibratedRed:0.65 green:1.0 blue:0.45 alpha:1.0];
         NSColor *trailGreen = [NSColor colorWithCalibratedRed:0.0 green:0.95 blue:0.45 alpha:1.0];
+        NSColor *tailGlow = [NSColor colorWithCalibratedRed:0.85 green:1.0 blue:0.85 alpha:1.0];
+        NSColor *tailDim = [NSColor colorWithCalibratedRed:0.55 green:0.9 blue:0.55 alpha:1.0];
 
         _glyphAttributes = @{ NSFontAttributeName : _matrixFont,
                               NSForegroundColorAttributeName : trailGreen };
@@ -70,6 +74,24 @@ static const CGFloat kMinimumVisibleOpacity = 0.02;
         _headAttributes = @{ NSFontAttributeName : _matrixFont,
                              NSForegroundColorAttributeName : primaryGreen,
                              NSShadowAttributeName : headGlow };
+
+        NSShadow *brightTailGlow = [[NSShadow alloc] init];
+        brightTailGlow.shadowColor = [tailGlow colorWithAlphaComponent:0.75];
+        brightTailGlow.shadowBlurRadius = 10.0;
+        brightTailGlow.shadowOffset = NSZeroSize;
+
+        _tailGlowAttributes = @{ NSFontAttributeName : _matrixFont,
+                                 NSForegroundColorAttributeName : tailGlow,
+                                 NSShadowAttributeName : brightTailGlow };
+
+        NSShadow *dimTailGlow = [[NSShadow alloc] init];
+        dimTailGlow.shadowColor = [tailDim colorWithAlphaComponent:0.6];
+        dimTailGlow.shadowBlurRadius = 6.0;
+        dimTailGlow.shadowOffset = NSZeroSize;
+
+        _tailDimAttributes = @{ NSFontAttributeName : _matrixFont,
+                                NSForegroundColorAttributeName : tailDim,
+                                NSShadowAttributeName : dimTailGlow };
 
         _glyphSet = [self buildWeightedGlyphSet];
 
@@ -335,6 +357,8 @@ static const CGFloat kMinimumVisibleOpacity = 0.02;
         NSInteger headIndex = [column[@"headIndex"] integerValue];
         CGFloat x = [column[@"x"] doubleValue];
 
+        NSMutableArray<NSDictionary *> *visibleRows = [NSMutableArray array];
+
         for (NSInteger row = 0; row < rows.count; row++) {
             NSMutableDictionary *rowState = rows[row];
             CGFloat opacity = [rowState[@"opacity"] doubleValue];
@@ -353,9 +377,31 @@ static const CGFloat kMinimumVisibleOpacity = 0.02;
                 break;
             }
 
+            [visibleRows addObject:@{ @"row" : @(row), @"opacity" : @(opacity), @"y" : @(y) }];
+        }
+
+        NSInteger glowRowIndex = -1;
+        NSInteger dimGlowRowIndex = -1;
+
+        if (visibleRows.count > 0) {
+            glowRowIndex = [visibleRows.lastObject[@"row"] integerValue];
+        }
+
+        if (visibleRows.count > 1) {
+            dimGlowRowIndex = [visibleRows[visibleRows.count - 2][@"row"] integerValue];
+        }
+
+        for (NSDictionary *rowInfo in visibleRows) {
+            NSInteger row = [rowInfo[@"row"] integerValue];
+            CGFloat opacity = [rowInfo[@"opacity"] doubleValue];
+            CGFloat y = [rowInfo[@"y"] doubleValue];
+            NSMutableDictionary *rowState = rows[row];
+
             NSString *glyph = rowState[@"glyph"];
             BOOL isHead = (row == headIndex);
-            NSDictionary *attributes = [self attributesForRow:row opacity:opacity isHead:isHead];
+            BOOL isGlow = (!isHead && row == glowRowIndex);
+            BOOL isDimGlow = (!isHead && row == dimGlowRowIndex);
+            NSDictionary *attributes = [self attributesForRow:row opacity:opacity isHead:isHead isGlow:isGlow isDimGlow:isDimGlow];
 
             if (!attributes) {
                 continue;
@@ -388,9 +434,17 @@ static const CGFloat kMinimumVisibleOpacity = 0.02;
     }
 }
 
-- (NSDictionary<NSAttributedStringKey, id> *)attributesForRow:(NSInteger)row opacity:(CGFloat)opacity isHead:(BOOL)isHead
+- (NSDictionary<NSAttributedStringKey, id> *)attributesForRow:(NSInteger)row opacity:(CGFloat)opacity isHead:(BOOL)isHead isGlow:(BOOL)isGlow isDimGlow:(BOOL)isDimGlow
 {
-    NSDictionary *baseAttributes = isHead ? self.headAttributes : self.glyphAttributes;
+    NSDictionary *baseAttributes = self.glyphAttributes;
+
+    if (isHead) {
+        baseAttributes = self.headAttributes;
+    } else if (isGlow) {
+        baseAttributes = self.tailGlowAttributes;
+    } else if (isDimGlow) {
+        baseAttributes = self.tailDimAttributes;
+    }
     NSMutableDictionary *attributes = [baseAttributes mutableCopy];
 
     NSColor *color = baseAttributes[NSForegroundColorAttributeName];
@@ -398,13 +452,11 @@ static const CGFloat kMinimumVisibleOpacity = 0.02;
         attributes[NSForegroundColorAttributeName] = [color colorWithAlphaComponent:opacity * color.alphaComponent];
     }
 
-    if (isHead) {
-        NSShadow *shadow = baseAttributes[NSShadowAttributeName];
-        if (shadow) {
-            NSShadow *shadowCopy = [shadow copy];
-            shadowCopy.shadowColor = [shadow.shadowColor colorWithAlphaComponent:opacity];
-            attributes[NSShadowAttributeName] = shadowCopy;
-        }
+    NSShadow *shadow = baseAttributes[NSShadowAttributeName];
+    if (shadow) {
+        NSShadow *shadowCopy = [shadow copy];
+        shadowCopy.shadowColor = [shadow.shadowColor colorWithAlphaComponent:opacity];
+        attributes[NSShadowAttributeName] = shadowCopy;
     }
 
     return attributes;
