@@ -19,9 +19,14 @@
 @property (nonatomic, assign) NSInteger columnCount;
 @property (nonatomic, assign) CGFloat lastWidth;
 @property (nonatomic, assign) NSTimeInterval lastFrameTimestamp;
+@property (nonatomic, assign) NSInteger rowsPerColumn;
 
 @property (nonatomic, strong) NSArray<NSString *> *glyphSet;
 @property (nonatomic, strong) NSMutableArray<NSMutableDictionary *> *columns;
+@property (nonatomic, strong) NSArray<NSNumber *> *columnPositions;
+@property (nonatomic, assign) NSInteger nextColumnIndex;
+@property (nonatomic, assign) NSTimeInterval columnSpawnAccumulator;
+@property (nonatomic, assign) NSTimeInterval columnSpawnDelay;
 @property (nonatomic, assign) NSInteger fadeLength;
 
 - (void)resetColumns;
