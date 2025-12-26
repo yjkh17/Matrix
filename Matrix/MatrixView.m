@@ -281,6 +281,10 @@
             NSString *glyph = glyphs[row];
             NSDictionary *attributes = [self attributesForRow:row];
 
+            if (!attributes) {
+                continue;
+            }
+
             if (row == 0) {
                 [self drawHeadGlyph:glyph atPoint:NSMakePoint(x + jitter, y) withAttributes:attributes];
                 if (thick) {
@@ -322,8 +326,14 @@
         return self.headAttributes;
     }
 
-    NSInteger index = MIN((NSInteger)self.fadeAttributes.count - 1, MAX(0, row - 1));
-    return self.fadeAttributes[index];
+    NSInteger fadeIndex = row - 1;
+
+    if (fadeIndex > self.fadeLength) {
+        return nil;
+    }
+
+    NSInteger clampedIndex = MIN((NSInteger)self.fadeAttributes.count - 1, MAX(0, fadeIndex));
+    return self.fadeAttributes[clampedIndex];
 }
 
 - (void)drawHeadGlyph:(NSString *)glyph atPoint:(NSPoint)point withAttributes:(NSDictionary<NSAttributedStringKey, id> *)attributes
