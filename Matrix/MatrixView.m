@@ -19,6 +19,8 @@ static const CGFloat kMinimumVisibleOpacity = 0.02;
 @property (nonatomic, strong) NSDictionary<NSAttributedStringKey, id> *tailGlowAttributes;
 @property (nonatomic, strong) NSDictionary<NSAttributedStringKey, id> *tailDimAttributes;
 
+@property (nonatomic, strong) NSDictionary<NSString *, NSNumber *> *glyphWidths;
+
 @property (nonatomic, assign) CGFloat characterWidth;
 @property (nonatomic, assign) CGFloat characterHeight;
 @property (nonatomic, assign) NSInteger rowsPerColumn;
@@ -31,6 +33,8 @@ static const CGFloat kMinimumVisibleOpacity = 0.02;
 
 @property (nonatomic, assign) CGFloat opacityMultiplier;
 @property (nonatomic, assign) CGFloat speedMultiplier;
+
+@property (nonatomic, strong) NSMutableDictionary<NSString *, NSDictionary<NSAttributedStringKey, id> *> *attributesCache;
 
 @end
 
@@ -68,13 +72,13 @@ static const CGFloat kMinimumVisibleOpacity = 0.02;
     if (self) {
         [self setAnimationTimeInterval:1/30.0];
 
+        _glyphSet = [self buildWeightedGlyphSet];
+
         CGFloat nearFontSize = isPreview ? 18.0 : 26.0;
         CGFloat farFontSize = isPreview ? 13.0 : 18.0;
 
         _nearLayer = [self buildLayerWithFontSize:nearFontSize opacityMultiplier:1.0 headGlowEnabled:YES speedMultiplier:1.0];
         _farLayer = [self buildLayerWithFontSize:farFontSize opacityMultiplier:0.55 headGlowEnabled:NO speedMultiplier:0.65];
-
-        _glyphSet = [self buildWeightedGlyphSet];
 
         self.lastFrameTimestamp = 0;
         self.wantsLayer = YES;
@@ -140,12 +144,20 @@ static const CGFloat kMinimumVisibleOpacity = 0.02;
     layer.font = [NSFont monospacedSystemFontOfSize:fontSize weight:NSFontWeightRegular];
 
     NSDictionary *sizingAttributes = @{ NSFontAttributeName : layer.font };
-    layer.characterWidth = [@"0" sizeWithAttributes:sizingAttributes].width + 1.0;
-    layer.characterHeight = layer.font.ascender - layer.font.descender + layer.font.leading;
+    CGFloat widestGlyph = 0.0;
+    NSMutableDictionary<NSString *, NSNumber *> *glyphWidths = [NSMutableDictionary dictionaryWithCapacity:self.glyphSet.count];
+    for (NSString *glyph in self.glyphSet) {
+        CGFloat width = ceil([glyph sizeWithAttributes:sizingAttributes].width);
+        widestGlyph = MAX(widestGlyph, width);
+        glyphWidths[glyph] = @(width);
+    }
 
-    NSColor *primaryGreen = [NSColor colorWithCalibratedRed:0.65 green:1.0 blue:0.45 alpha:1.0];
+    layer.characterWidth = widestGlyph;
+    layer.glyphWidths = glyphWidths;
+    layer.characterHeight = ceil(layer.font.ascender - layer.font.descender + layer.font.leading);
+
     NSColor *trailGreen = [NSColor colorWithCalibratedRed:0.0 green:0.95 blue:0.45 alpha:1.0];
-    NSColor *tailGlow = [NSColor colorWithCalibratedRed:0.85 green:1.0 blue:0.85 alpha:1.0];
+    NSColor *headWhite = [NSColor colorWithCalibratedWhite:1.0 alpha:1.0];
     NSColor *tailDim = [NSColor colorWithCalibratedRed:0.55 green:0.9 blue:0.55 alpha:1.0];
 
     layer.glyphAttributes = @{ NSFontAttributeName : layer.font,
@@ -154,22 +166,22 @@ static const CGFloat kMinimumVisibleOpacity = 0.02;
     NSShadow *headGlow = nil;
     if (headGlowEnabled) {
         headGlow = [[NSShadow alloc] init];
-        headGlow.shadowColor = [primaryGreen colorWithAlphaComponent:0.85];
-        headGlow.shadowBlurRadius = 8.0;
+        headGlow.shadowColor = [headWhite colorWithAlphaComponent:0.95];
+        headGlow.shadowBlurRadius = 10.0;
         headGlow.shadowOffset = NSZeroSize;
     }
 
     layer.headAttributes = @{ NSFontAttributeName : layer.font,
-                              NSForegroundColorAttributeName : primaryGreen,
+                              NSForegroundColorAttributeName : headWhite,
                               NSShadowAttributeName : headGlow ?: [NSNull null] };
 
     NSShadow *brightTailGlow = [[NSShadow alloc] init];
-    brightTailGlow.shadowColor = [tailGlow colorWithAlphaComponent:0.75];
-    brightTailGlow.shadowBlurRadius = 10.0;
+    brightTailGlow.shadowColor = [trailGreen colorWithAlphaComponent:0.85];
+    brightTailGlow.shadowBlurRadius = 9.0;
     brightTailGlow.shadowOffset = NSZeroSize;
 
     layer.tailGlowAttributes = @{ NSFontAttributeName : layer.font,
-                                  NSForegroundColorAttributeName : tailGlow,
+                                  NSForegroundColorAttributeName : trailGreen,
                                   NSShadowAttributeName : brightTailGlow };
 
     NSShadow *dimTailGlow = [[NSShadow alloc] init];
@@ -189,6 +201,7 @@ static const CGFloat kMinimumVisibleOpacity = 0.02;
     layer.nextColumnIndex = 0;
     layer.columnSpawnAccumulator = 0;
     layer.columnSpawnDelay = [self randomColumnSpawnDelay];
+    layer.attributesCache = [NSMutableDictionary dictionary];
 
     return layer;
 }
@@ -261,39 +274,10 @@ static const CGFloat kMinimumVisibleOpacity = 0.02;
 
 - (NSArray<NSString *> *)buildWeightedGlyphSet
 {
-    NSArray<NSString *> *primaryKatakana = @[ @"ｱ", @"ｲ", @"ｳ", @"ｴ", @"ｵ", @"ｶ", @"ｷ", @"ｸ", @"ｹ", @"ｺ",
-                                              @"ｻ", @"ｼ", @"ｽ", @"ｾ", @"ｿ", @"ﾀ", @"ﾁ", @"ﾂ", @"ﾃ", @"ﾄ",
-                                              @"ﾅ", @"ﾆ", @"ﾇ", @"ﾈ", @"ﾉ", @"ﾊ", @"ﾋ", @"ﾌ", @"ﾍ", @"ﾎ",
-                                              @"ﾏ", @"ﾐ", @"ﾑ", @"ﾒ", @"ﾓ", @"ﾔ", @"ﾕ", @"ﾖ", @"ﾗ", @"ﾘ",
-                                              @"ﾙ", @"ﾚ", @"ﾛ", @"ﾜ", @"ﾝ" ];
-
-    NSArray<NSString *> *smallKatakana = @[ @"ｧ", @"ｨ", @"ｩ", @"ｪ", @"ｫ", @"ｯ", @"ｰ" ];
-    NSArray<NSString *> *numerals = @[ @"0", @"1", @"2", @"3", @"4", @"5", @"7", @"8", @"9" ];
-    NSArray<NSString *> *punctuation = @[ @"＋", @"－", @"＝", @"＊", @"／", @"・", @"･", @"◎", @"◇", @"◆", @"○", @"●", @"|", @"¦" ];
-
-    NSMutableArray<NSString *> *weightedGlyphs = [NSMutableArray array];
-
-    void (^appendGlyphs)(NSArray<NSString *> *, NSInteger) = ^(NSArray<NSString *> *glyphs, NSInteger weight) {
-        if (weight <= 0) {
-            return;
-        }
-
-        for (NSString *glyph in glyphs) {
-            for (NSInteger index = 0; index < weight; index++) {
-                [weightedGlyphs addObject:glyph];
-            }
-        }
-    };
-
-    // The weights below mirror the observed frequency of glyph families in the source material.
-    appendGlyphs(primaryKatakana, 6);   // Dominant katakana stream characters.
-    appendGlyphs(smallKatakana, 3);     // Less frequent small kana and prolonged sound mark.
-    appendGlyphs(@[ @"日" ], 5);       // Standout kanji seen regularly in the rain.
-    appendGlyphs(@[ @"Z" ], 2);        // Occasional Latin glyphs.
-    appendGlyphs(numerals, 4);          // Numerals (notably excluding 6).
-    appendGlyphs(punctuation, 1);       // Sparse punctuation and symbols.
-
-    return weightedGlyphs;
+    // Glyph set reproduced exactly from the supplied reference sheet so the rain only uses those symbols.
+    return @[ @"0", @"1", @"2", @"3", @"4", @"5", @"6", @"7", @"8", @"9",
+              @"A", @"C", @"E", @"F", @"H", @"I", @"K", @"L", @"N", @"R", @"S", @"T", @"V", @"X", @"Z",
+              @"-", @"\"", @"·", @"|", @"+", @";", @">", @"<", @"*" ];
 }
 
 - (NSTimeInterval)randomColumnSpawnDelay
@@ -323,7 +307,8 @@ static const CGFloat kMinimumVisibleOpacity = 0.02;
 
 - (NSMutableDictionary *)buildColumnAtX:(CGFloat)x layer:(MatrixLayer *)layer
 {
-    CGFloat baseSpeed = SSRandomFloatBetween(50.0, 120.0) * (layer.characterHeight / 18.0) * layer.speedMultiplier;
+    CGFloat speedJitter = SSRandomFloatBetween(0.55, 1.6);
+    CGFloat baseSpeed = SSRandomFloatBetween(35.0, 185.0) * (layer.characterHeight / 18.0) * layer.speedMultiplier * speedJitter;
     NSTimeInterval fadeDuration = [self fadeDurationForBaseSpeed:baseSpeed referenceHeight:layer.characterHeight];
     NSTimeInterval spawnInterval = MAX(0.03, layer.characterHeight / MAX(baseSpeed, 1.0));
 
@@ -469,10 +454,17 @@ static const CGFloat kMinimumVisibleOpacity = 0.02;
                     continue;
                 }
 
+                CGFloat glyphWidth = layer.characterWidth;
+                NSNumber *widthValue = layer.glyphWidths[glyph];
+                if (widthValue) {
+                    glyphWidth = widthValue.doubleValue;
+                }
+                CGFloat centeredX = x + (layer.characterWidth - glyphWidth) * 0.5;
+
                 if (isHead) {
-                    [self drawHeadGlyph:glyph atPoint:NSMakePoint(x, y) withAttributes:attributes];
+                    [self drawHeadGlyph:glyph atPoint:NSMakePoint(centeredX, y) withAttributes:attributes];
                 } else {
-                    [glyph drawAtPoint:NSMakePoint(x, y) withAttributes:attributes];
+                    [glyph drawAtPoint:NSMakePoint(centeredX, y) withAttributes:attributes];
                 }
             }
         }
@@ -508,10 +500,18 @@ static const CGFloat kMinimumVisibleOpacity = 0.02;
         baseAttributes = layer.tailDimAttributes;
     }
 
+    CGFloat clampedOpacity = MIN(1.0, MAX(0.0, opacity * layer.opacityMultiplier));
+
+    NSInteger opacityBucket = (NSInteger)round(clampedOpacity * 100.0);
+    NSString *cacheKey = [NSString stringWithFormat:@"%p-%ld", baseAttributes, (long)opacityBucket];
+    NSDictionary *cachedAttributes = layer.attributesCache[cacheKey];
+    if (cachedAttributes) {
+        return cachedAttributes;
+    }
+
     NSMutableDictionary *attributes = [baseAttributes mutableCopy];
 
     NSColor *color = baseAttributes[NSForegroundColorAttributeName];
-    CGFloat clampedOpacity = MIN(1.0, MAX(0.0, opacity * layer.opacityMultiplier));
     if (color) {
         attributes[NSForegroundColorAttributeName] = [color colorWithAlphaComponent:clampedOpacity * color.alphaComponent];
     }
@@ -520,11 +520,13 @@ static const CGFloat kMinimumVisibleOpacity = 0.02;
     NSShadow *shadow = ([shadowObject isKindOfClass:[NSShadow class]] ? shadowObject : nil);
     if (shadow) {
         NSShadow *shadowCopy = [shadow copy];
-        shadowCopy.shadowColor = [shadow.shadowColor colorWithAlphaComponent:clampedOpacity];
+        shadowCopy.shadowColor = [shadow.shadowColor colorWithAlphaComponent:clampedOpacity * shadow.shadowColor.alphaComponent];
         attributes[NSShadowAttributeName] = shadowCopy;
     } else {
         [attributes removeObjectForKey:NSShadowAttributeName];
     }
+
+    layer.attributesCache[cacheKey] = attributes;
 
     return attributes;
 }
