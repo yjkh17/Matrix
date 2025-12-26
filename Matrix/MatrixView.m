@@ -140,14 +140,17 @@
     CGFloat width = self.bounds.size.width;
     CGFloat height = self.bounds.size.height;
 
-    NSInteger columnCount = 1;
     CGFloat spacing = self.characterWidth * 1.1;
-    CGFloat xStart = (width - spacing) * 0.5;
+    NSInteger columnCount = MAX(1, (NSInteger)floor(width / spacing));
+    CGFloat totalWidth = (columnCount - 1) * spacing;
+    CGFloat xStart = (width - totalWidth) * 0.5;
 
     NSMutableArray<NSNumber *> *positions = [NSMutableArray arrayWithCapacity:columnCount];
-    CGFloat x = xStart + (spacing * 0.5);
-    x = MIN(MAX(self.characterWidth * 0.5, x), width - self.characterWidth * 1.5);
-    [positions addObject:@(x)];
+    for (NSInteger columnIndex = 0; columnIndex < columnCount; columnIndex++) {
+        CGFloat x = xStart + (spacing * columnIndex);
+        x = MIN(MAX(self.characterWidth * 0.5, x), width - self.characterWidth * 1.5);
+        [positions addObject:@(x)];
+    }
 
     self.columnPositions = positions;
 
