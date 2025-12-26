@@ -11,9 +11,9 @@
 static const NSTimeInterval kGlyphFadeDuration = 2.25;
 static const CGFloat kMinimumVisibleOpacity = 0.02;
 
-@interface MatrixView ()
+@interface MatrixLayer : NSObject
 
-@property (nonatomic, strong) NSFont *matrixFont;
+@property (nonatomic, strong) NSFont *font;
 @property (nonatomic, strong) NSDictionary<NSAttributedStringKey, id> *glyphAttributes;
 @property (nonatomic, strong) NSDictionary<NSAttributedStringKey, id> *headAttributes;
 @property (nonatomic, strong) NSDictionary<NSAttributedStringKey, id> *tailGlowAttributes;
@@ -21,15 +21,26 @@ static const CGFloat kMinimumVisibleOpacity = 0.02;
 
 @property (nonatomic, assign) CGFloat characterWidth;
 @property (nonatomic, assign) CGFloat characterHeight;
-@property (nonatomic, assign) NSTimeInterval lastFrameTimestamp;
 @property (nonatomic, assign) NSInteger rowsPerColumn;
 
-@property (nonatomic, strong) NSArray<NSString *> *glyphSet;
 @property (nonatomic, strong) NSMutableArray<NSMutableDictionary *> *columns;
 @property (nonatomic, strong) NSArray<NSNumber *> *columnPositions;
 @property (nonatomic, assign) NSInteger nextColumnIndex;
 @property (nonatomic, assign) NSTimeInterval columnSpawnAccumulator;
 @property (nonatomic, assign) NSTimeInterval columnSpawnDelay;
+
+@property (nonatomic, assign) CGFloat opacityMultiplier;
+@property (nonatomic, assign) CGFloat speedMultiplier;
+
+@end
+
+@interface MatrixView ()
+
+@property (nonatomic, strong) MatrixLayer *nearLayer;
+@property (nonatomic, strong) MatrixLayer *farLayer;
+@property (nonatomic, assign) NSTimeInterval lastFrameTimestamp;
+
+@property (nonatomic, strong) NSArray<NSString *> *glyphSet;
 @property (nonatomic, strong) NSImage *frameBuffer;
 
 - (void)resetColumns;
@@ -38,12 +49,15 @@ static const CGFloat kMinimumVisibleOpacity = 0.02;
 - (NSTimeInterval)randomGlyphDwellTime;
 - (NSTimeInterval)randomHeadGlyphDwellTime;
 - (NSTimeInterval)randomRowGlyphDwellTime;
-- (NSTimeInterval)fadeDurationForBaseSpeed:(CGFloat)baseSpeed;
+- (NSTimeInterval)fadeDurationForBaseSpeed:(CGFloat)baseSpeed referenceHeight:(CGFloat)referenceHeight;
 - (void)ensureFrameBuffer;
 - (void)renderFrame;
 - (NSMutableDictionary *)rowStateWithGlyph:(NSString *)glyph opacity:(CGFloat)opacity age:(NSTimeInterval)age;
 - (void)spawnGlyphInColumn:(NSMutableDictionary *)column;
 
+@end
+
+@implementation MatrixLayer
 @end
 
 @implementation MatrixView
@@ -54,46 +68,11 @@ static const CGFloat kMinimumVisibleOpacity = 0.02;
     if (self) {
         [self setAnimationTimeInterval:1/30.0];
 
-        _matrixFont = [NSFont monospacedSystemFontOfSize:isPreview ? 18.0 : 26.0 weight:NSFontWeightRegular];
+        CGFloat nearFontSize = isPreview ? 18.0 : 26.0;
+        CGFloat farFontSize = isPreview ? 13.0 : 18.0;
 
-        NSDictionary *sizingAttributes = @{ NSFontAttributeName : _matrixFont };
-        _characterWidth = [@"0" sizeWithAttributes:sizingAttributes].width + 1.0;
-        _characterHeight = _matrixFont.ascender - _matrixFont.descender + _matrixFont.leading;
-
-        NSColor *primaryGreen = [NSColor colorWithCalibratedRed:0.65 green:1.0 blue:0.45 alpha:1.0];
-        NSColor *trailGreen = [NSColor colorWithCalibratedRed:0.0 green:0.95 blue:0.45 alpha:1.0];
-        NSColor *tailGlow = [NSColor colorWithCalibratedRed:0.85 green:1.0 blue:0.85 alpha:1.0];
-        NSColor *tailDim = [NSColor colorWithCalibratedRed:0.55 green:0.9 blue:0.55 alpha:1.0];
-
-        _glyphAttributes = @{ NSFontAttributeName : _matrixFont,
-                              NSForegroundColorAttributeName : trailGreen };
-
-        NSShadow *headGlow = [[NSShadow alloc] init];
-        headGlow.shadowColor = [primaryGreen colorWithAlphaComponent:0.85];
-        headGlow.shadowBlurRadius = 8.0;
-        headGlow.shadowOffset = NSZeroSize;
-
-        _headAttributes = @{ NSFontAttributeName : _matrixFont,
-                             NSForegroundColorAttributeName : primaryGreen,
-                             NSShadowAttributeName : headGlow };
-
-        NSShadow *brightTailGlow = [[NSShadow alloc] init];
-        brightTailGlow.shadowColor = [tailGlow colorWithAlphaComponent:0.75];
-        brightTailGlow.shadowBlurRadius = 10.0;
-        brightTailGlow.shadowOffset = NSZeroSize;
-
-        _tailGlowAttributes = @{ NSFontAttributeName : _matrixFont,
-                                 NSForegroundColorAttributeName : tailGlow,
-                                 NSShadowAttributeName : brightTailGlow };
-
-        NSShadow *dimTailGlow = [[NSShadow alloc] init];
-        dimTailGlow.shadowColor = [tailDim colorWithAlphaComponent:0.6];
-        dimTailGlow.shadowBlurRadius = 6.0;
-        dimTailGlow.shadowOffset = NSZeroSize;
-
-        _tailDimAttributes = @{ NSFontAttributeName : _matrixFont,
-                                NSForegroundColorAttributeName : tailDim,
-                                NSShadowAttributeName : dimTailGlow };
+        _nearLayer = [self buildLayerWithFontSize:nearFontSize opacityMultiplier:1.0 headGlowEnabled:YES speedMultiplier:1.0];
+        _farLayer = [self buildLayerWithFontSize:farFontSize opacityMultiplier:0.55 headGlowEnabled:NO speedMultiplier:0.65];
 
         _glyphSet = [self buildWeightedGlyphSet];
 
@@ -154,6 +133,66 @@ static const CGFloat kMinimumVisibleOpacity = 0.02;
     [self setNeedsDisplay:YES];
 }
 
+- (MatrixLayer *)buildLayerWithFontSize:(CGFloat)fontSize opacityMultiplier:(CGFloat)opacityMultiplier headGlowEnabled:(BOOL)headGlowEnabled speedMultiplier:(CGFloat)speedMultiplier
+{
+    MatrixLayer *layer = [[MatrixLayer alloc] init];
+
+    layer.font = [NSFont monospacedSystemFontOfSize:fontSize weight:NSFontWeightRegular];
+
+    NSDictionary *sizingAttributes = @{ NSFontAttributeName : layer.font };
+    layer.characterWidth = [@"0" sizeWithAttributes:sizingAttributes].width + 1.0;
+    layer.characterHeight = layer.font.ascender - layer.font.descender + layer.font.leading;
+
+    NSColor *primaryGreen = [NSColor colorWithCalibratedRed:0.65 green:1.0 blue:0.45 alpha:1.0];
+    NSColor *trailGreen = [NSColor colorWithCalibratedRed:0.0 green:0.95 blue:0.45 alpha:1.0];
+    NSColor *tailGlow = [NSColor colorWithCalibratedRed:0.85 green:1.0 blue:0.85 alpha:1.0];
+    NSColor *tailDim = [NSColor colorWithCalibratedRed:0.55 green:0.9 blue:0.55 alpha:1.0];
+
+    layer.glyphAttributes = @{ NSFontAttributeName : layer.font,
+                               NSForegroundColorAttributeName : trailGreen };
+
+    NSShadow *headGlow = nil;
+    if (headGlowEnabled) {
+        headGlow = [[NSShadow alloc] init];
+        headGlow.shadowColor = [primaryGreen colorWithAlphaComponent:0.85];
+        headGlow.shadowBlurRadius = 8.0;
+        headGlow.shadowOffset = NSZeroSize;
+    }
+
+    layer.headAttributes = @{ NSFontAttributeName : layer.font,
+                              NSForegroundColorAttributeName : primaryGreen,
+                              NSShadowAttributeName : headGlow ?: [NSNull null] };
+
+    NSShadow *brightTailGlow = [[NSShadow alloc] init];
+    brightTailGlow.shadowColor = [tailGlow colorWithAlphaComponent:0.75];
+    brightTailGlow.shadowBlurRadius = 10.0;
+    brightTailGlow.shadowOffset = NSZeroSize;
+
+    layer.tailGlowAttributes = @{ NSFontAttributeName : layer.font,
+                                  NSForegroundColorAttributeName : tailGlow,
+                                  NSShadowAttributeName : brightTailGlow };
+
+    NSShadow *dimTailGlow = [[NSShadow alloc] init];
+    dimTailGlow.shadowColor = [tailDim colorWithAlphaComponent:0.6];
+    dimTailGlow.shadowBlurRadius = 6.0;
+    dimTailGlow.shadowOffset = NSZeroSize;
+
+    layer.tailDimAttributes = @{ NSFontAttributeName : layer.font,
+                                 NSForegroundColorAttributeName : tailDim,
+                                 NSShadowAttributeName : dimTailGlow };
+
+    layer.opacityMultiplier = opacityMultiplier;
+    layer.speedMultiplier = speedMultiplier;
+
+    layer.columns = [NSMutableArray array];
+    layer.columnPositions = @[];
+    layer.nextColumnIndex = 0;
+    layer.columnSpawnAccumulator = 0;
+    layer.columnSpawnDelay = [self randomColumnSpawnDelay];
+
+    return layer;
+}
+
 - (BOOL)hasConfigureSheet
 {
     return NO;
@@ -166,10 +205,20 @@ static const CGFloat kMinimumVisibleOpacity = 0.02;
 
 - (void)resetColumns
 {
+    [self resetLayer:self.farLayer];
+    [self resetLayer:self.nearLayer];
+}
+
+- (void)resetLayer:(MatrixLayer *)layer
+{
+    if (!layer) {
+        return;
+    }
+
     CGFloat width = self.bounds.size.width;
     CGFloat height = self.bounds.size.height;
 
-    CGFloat spacing = self.characterWidth * 1.1;
+    CGFloat spacing = layer.characterWidth * 1.1;
     NSInteger columnCount = MAX(1, (NSInteger)floor(width / spacing));
     CGFloat totalWidth = (columnCount - 1) * spacing;
     CGFloat xStart = (width - totalWidth) * 0.5;
@@ -177,7 +226,7 @@ static const CGFloat kMinimumVisibleOpacity = 0.02;
     NSMutableArray<NSNumber *> *positions = [NSMutableArray arrayWithCapacity:columnCount];
     for (NSInteger columnIndex = 0; columnIndex < columnCount; columnIndex++) {
         CGFloat x = xStart + (spacing * columnIndex);
-        x = MIN(MAX(self.characterWidth * 0.5, x), width - self.characterWidth * 1.5);
+        x = MIN(MAX(layer.characterWidth * 0.5, x), width - layer.characterWidth * 1.5);
         [positions addObject:@(x)];
     }
 
@@ -186,17 +235,17 @@ static const CGFloat kMinimumVisibleOpacity = 0.02;
         [positions exchangeObjectAtIndex:index withObjectAtIndex:swapIndex];
     }
 
-    self.columnPositions = positions;
+    layer.columnPositions = positions;
 
-    self.rowsPerColumn = (NSInteger)ceil(height / self.characterHeight) + 4;
+    layer.rowsPerColumn = (NSInteger)ceil(height / layer.characterHeight) + 4;
 
-    self.columns = [NSMutableArray arrayWithCapacity:columnCount];
-    self.nextColumnIndex = 0;
-    self.columnSpawnAccumulator = 0;
-    self.columnSpawnDelay = [self randomColumnSpawnDelay];
+    layer.columns = [NSMutableArray arrayWithCapacity:columnCount];
+    layer.nextColumnIndex = 0;
+    layer.columnSpawnAccumulator = 0;
+    layer.columnSpawnDelay = [self randomColumnSpawnDelay];
 
     if (columnCount > 0) {
-        [self addNextColumn];
+        [self addNextColumnForLayer:layer];
     }
 }
 
@@ -272,14 +321,14 @@ static const CGFloat kMinimumVisibleOpacity = 0.02;
     }
 }
 
-- (NSMutableDictionary *)buildColumnAtX:(CGFloat)x
+- (NSMutableDictionary *)buildColumnAtX:(CGFloat)x layer:(MatrixLayer *)layer
 {
-    CGFloat baseSpeed = SSRandomFloatBetween(50.0, 120.0) * (self.characterHeight / 18.0);
-    NSTimeInterval fadeDuration = [self fadeDurationForBaseSpeed:baseSpeed];
-    NSTimeInterval spawnInterval = MAX(0.03, self.characterHeight / baseSpeed);
+    CGFloat baseSpeed = SSRandomFloatBetween(50.0, 120.0) * (layer.characterHeight / 18.0) * layer.speedMultiplier;
+    NSTimeInterval fadeDuration = [self fadeDurationForBaseSpeed:baseSpeed referenceHeight:layer.characterHeight];
+    NSTimeInterval spawnInterval = MAX(0.03, layer.characterHeight / MAX(baseSpeed, 1.0));
 
-    NSMutableArray<NSMutableDictionary *> *rows = [NSMutableArray arrayWithCapacity:self.rowsPerColumn];
-    for (NSInteger rowIndex = 0; rowIndex < self.rowsPerColumn; rowIndex++) {
+    NSMutableArray<NSMutableDictionary *> *rows = [NSMutableArray arrayWithCapacity:layer.rowsPerColumn];
+    for (NSInteger rowIndex = 0; rowIndex < layer.rowsPerColumn; rowIndex++) {
         [rows addObject:[self rowStateWithGlyph:[self randomGlyph] opacity:0 age:fadeDuration]];
     }
 
@@ -295,7 +344,7 @@ static const CGFloat kMinimumVisibleOpacity = 0.02;
         @"x" : @(x)
     } mutableCopy];
 
-    NSInteger warmupSteps = arc4random_uniform((uint32_t)MIN(self.rowsPerColumn, 6));
+    NSInteger warmupSteps = arc4random_uniform((uint32_t)MIN(layer.rowsPerColumn, 6));
     for (NSInteger step = 0; step < warmupSteps; step++) {
         [self spawnGlyphInColumn:column];
     }
@@ -336,15 +385,15 @@ static const CGFloat kMinimumVisibleOpacity = 0.02;
     column[@"headIndex"] = @(headIndex);
 }
 
-- (void)addNextColumn
+- (void)addNextColumnForLayer:(MatrixLayer *)layer
 {
-    if (self.nextColumnIndex >= self.columnPositions.count) {
+    if (!layer || layer.nextColumnIndex >= layer.columnPositions.count) {
         return;
     }
 
-    CGFloat x = [self.columnPositions[self.nextColumnIndex] doubleValue];
-    [self.columns addObject:[self buildColumnAtX:x]];
-    self.nextColumnIndex += 1;
+    CGFloat x = [layer.columnPositions[layer.nextColumnIndex] doubleValue];
+    [layer.columns addObject:[self buildColumnAtX:x layer:layer]];
+    layer.nextColumnIndex += 1;
 }
 
 - (void)renderFrame
@@ -360,114 +409,121 @@ static const CGFloat kMinimumVisibleOpacity = 0.02;
     [[NSColor blackColor] set];
     NSRectFill(imageRect);
 
+    NSArray<MatrixLayer *> *layers = @[ self.farLayer, self.nearLayer ];
     CGFloat bufferHeight = self.frameBuffer.size.height;
 
-    for (NSInteger columnIndex = 0; columnIndex < self.columns.count; columnIndex++) {
-        NSMutableDictionary *column = self.columns[columnIndex];
-        NSArray<NSMutableDictionary *> *rows = column[@"rows"];
-        NSInteger headIndex = [column[@"headIndex"] integerValue];
-        CGFloat x = [column[@"x"] doubleValue];
+    for (MatrixLayer *layer in layers) {
+        for (NSInteger columnIndex = 0; columnIndex < layer.columns.count; columnIndex++) {
+            NSMutableDictionary *column = layer.columns[columnIndex];
+            NSArray<NSMutableDictionary *> *rows = column[@"rows"];
+            NSInteger headIndex = [column[@"headIndex"] integerValue];
+            CGFloat x = [column[@"x"] doubleValue];
 
-        NSMutableArray<NSDictionary *> *visibleRows = [NSMutableArray array];
+            NSMutableArray<NSDictionary *> *visibleRows = [NSMutableArray array];
 
-        for (NSInteger row = 0; row < rows.count; row++) {
-            NSMutableDictionary *rowState = rows[row];
-            CGFloat opacity = [rowState[@"opacity"] doubleValue];
+            for (NSInteger row = 0; row < rows.count; row++) {
+                NSMutableDictionary *rowState = rows[row];
+                CGFloat opacity = [rowState[@"opacity"] doubleValue];
 
-            if (opacity < kMinimumVisibleOpacity) {
-                continue;
+                if (opacity < kMinimumVisibleOpacity) {
+                    continue;
+                }
+
+                CGFloat y = bufferHeight - layer.characterHeight - (row * layer.characterHeight);
+
+                if (y > bufferHeight + layer.characterHeight) {
+                    continue;
+                }
+
+                if (y < -layer.characterHeight) {
+                    break;
+                }
+
+                [visibleRows addObject:@{ @"row" : @(row), @"opacity" : @(opacity), @"y" : @(y) }];
             }
 
-            CGFloat y = bufferHeight - self.characterHeight - (row * self.characterHeight);
+            NSInteger glowRowIndex = -1;
+            NSInteger dimGlowRowIndex = -1;
 
-            if (y > bufferHeight + self.characterHeight) {
-                continue;
+            if (visibleRows.count > 0) {
+                glowRowIndex = [visibleRows.lastObject[@"row"] integerValue];
             }
 
-            if (y < -self.characterHeight) {
-                break;
+            if (visibleRows.count > 1) {
+                dimGlowRowIndex = [visibleRows[visibleRows.count - 2][@"row"] integerValue];
             }
 
-            [visibleRows addObject:@{ @"row" : @(row), @"opacity" : @(opacity), @"y" : @(y) }];
+            for (NSDictionary *rowInfo in visibleRows) {
+                NSInteger row = [rowInfo[@"row"] integerValue];
+                CGFloat opacity = [rowInfo[@"opacity"] doubleValue];
+                CGFloat y = [rowInfo[@"y"] doubleValue];
+                NSMutableDictionary *rowState = rows[row];
+
+                NSString *glyph = rowState[@"glyph"];
+                BOOL isHead = (row == headIndex);
+                BOOL isGlow = (!isHead && row == glowRowIndex);
+                BOOL isDimGlow = (!isHead && row == dimGlowRowIndex);
+                NSDictionary *attributes = [self attributesForRow:row opacity:opacity isHead:isHead isGlow:isGlow isDimGlow:isDimGlow inLayer:layer];
+
+                if (!attributes) {
+                    continue;
+                }
+
+                if (isHead) {
+                    [self drawHeadGlyph:glyph atPoint:NSMakePoint(x, y) withAttributes:attributes];
+                } else {
+                    [glyph drawAtPoint:NSMakePoint(x, y) withAttributes:attributes];
+                }
+            }
         }
-
-        NSInteger glowRowIndex = -1;
-        NSInteger dimGlowRowIndex = -1;
-
-        if (visibleRows.count > 0) {
-            glowRowIndex = [visibleRows.lastObject[@"row"] integerValue];
-        }
-
-        if (visibleRows.count > 1) {
-            dimGlowRowIndex = [visibleRows[visibleRows.count - 2][@"row"] integerValue];
-        }
-
-        for (NSDictionary *rowInfo in visibleRows) {
-            NSInteger row = [rowInfo[@"row"] integerValue];
-            CGFloat opacity = [rowInfo[@"opacity"] doubleValue];
-            CGFloat y = [rowInfo[@"y"] doubleValue];
-            NSMutableDictionary *rowState = rows[row];
-
-            NSString *glyph = rowState[@"glyph"];
-            BOOL isHead = (row == headIndex);
-            BOOL isGlow = (!isHead && row == glowRowIndex);
-            BOOL isDimGlow = (!isHead && row == dimGlowRowIndex);
-            NSDictionary *attributes = [self attributesForRow:row opacity:opacity isHead:isHead isGlow:isGlow isDimGlow:isDimGlow];
-
-            if (!attributes) {
-                continue;
-            }
-
-            if (isHead) {
-                [self drawHeadGlyph:glyph atPoint:NSMakePoint(x, y) withAttributes:attributes];
-            } else {
-                [glyph drawAtPoint:NSMakePoint(x, y) withAttributes:attributes];
-            }
-        }
-
     }
 
     [self.frameBuffer unlockFocus];
 }
 
-- (void)spawnColumnsWithDeltaTime:(NSTimeInterval)delta
+- (void)spawnColumnsWithDeltaTime:(NSTimeInterval)delta forLayer:(MatrixLayer *)layer
 {
-    if (self.nextColumnIndex >= self.columnPositions.count) {
+    if (!layer || layer.nextColumnIndex >= layer.columnPositions.count) {
         return;
     }
 
-    self.columnSpawnAccumulator += delta;
+    layer.columnSpawnAccumulator += delta;
 
-    while (self.columnSpawnAccumulator >= self.columnSpawnDelay && self.nextColumnIndex < self.columnPositions.count) {
-        self.columnSpawnAccumulator -= self.columnSpawnDelay;
-        [self addNextColumn];
-        self.columnSpawnDelay = [self randomColumnSpawnDelay];
+    while (layer.columnSpawnAccumulator >= layer.columnSpawnDelay && layer.nextColumnIndex < layer.columnPositions.count) {
+        layer.columnSpawnAccumulator -= layer.columnSpawnDelay;
+        [self addNextColumnForLayer:layer];
+        layer.columnSpawnDelay = [self randomColumnSpawnDelay];
     }
 }
 
-- (NSDictionary<NSAttributedStringKey, id> *)attributesForRow:(NSInteger)row opacity:(CGFloat)opacity isHead:(BOOL)isHead isGlow:(BOOL)isGlow isDimGlow:(BOOL)isDimGlow
+- (NSDictionary<NSAttributedStringKey, id> *)attributesForRow:(NSInteger)row opacity:(CGFloat)opacity isHead:(BOOL)isHead isGlow:(BOOL)isGlow isDimGlow:(BOOL)isDimGlow inLayer:(MatrixLayer *)layer
 {
-    NSDictionary *baseAttributes = self.glyphAttributes;
+    NSDictionary *baseAttributes = layer.glyphAttributes;
 
     if (isHead) {
-        baseAttributes = self.headAttributes;
+        baseAttributes = layer.headAttributes;
     } else if (isGlow) {
-        baseAttributes = self.tailGlowAttributes;
+        baseAttributes = layer.tailGlowAttributes;
     } else if (isDimGlow) {
-        baseAttributes = self.tailDimAttributes;
+        baseAttributes = layer.tailDimAttributes;
     }
+
     NSMutableDictionary *attributes = [baseAttributes mutableCopy];
 
     NSColor *color = baseAttributes[NSForegroundColorAttributeName];
+    CGFloat clampedOpacity = MIN(1.0, MAX(0.0, opacity * layer.opacityMultiplier));
     if (color) {
-        attributes[NSForegroundColorAttributeName] = [color colorWithAlphaComponent:opacity * color.alphaComponent];
+        attributes[NSForegroundColorAttributeName] = [color colorWithAlphaComponent:clampedOpacity * color.alphaComponent];
     }
 
-    NSShadow *shadow = baseAttributes[NSShadowAttributeName];
+    id shadowObject = baseAttributes[NSShadowAttributeName];
+    NSShadow *shadow = ([shadowObject isKindOfClass:[NSShadow class]] ? shadowObject : nil);
     if (shadow) {
         NSShadow *shadowCopy = [shadow copy];
-        shadowCopy.shadowColor = [shadow.shadowColor colorWithAlphaComponent:opacity];
+        shadowCopy.shadowColor = [shadow.shadowColor colorWithAlphaComponent:clampedOpacity];
         attributes[NSShadowAttributeName] = shadowCopy;
+    } else {
+        [attributes removeObjectForKey:NSShadowAttributeName];
     }
 
     return attributes;
@@ -484,15 +540,26 @@ static const CGFloat kMinimumVisibleOpacity = 0.02;
         return;
     }
 
-    [self spawnColumnsWithDeltaTime:delta];
+    [self updateLayer:self.farLayer withDeltaTime:delta];
+    [self updateLayer:self.nearLayer withDeltaTime:delta];
+}
 
-    for (NSInteger columnIndex = 0; columnIndex < self.columns.count; columnIndex++) {
-        NSMutableDictionary *column = self.columns[columnIndex];
+- (void)updateLayer:(MatrixLayer *)layer withDeltaTime:(NSTimeInterval)delta
+{
+    if (!layer || delta <= 0) {
+        return;
+    }
+
+    NSTimeInterval scaledDelta = delta * layer.speedMultiplier;
+    [self spawnColumnsWithDeltaTime:scaledDelta forLayer:layer];
+
+    for (NSInteger columnIndex = 0; columnIndex < layer.columns.count; columnIndex++) {
+        NSMutableDictionary *column = layer.columns[columnIndex];
         NSMutableArray<NSMutableDictionary *> *rows = column[@"rows"];
         NSTimeInterval spawnInterval = [column[@"spawnInterval"] doubleValue];
-        NSTimeInterval spawnAccumulator = [column[@"spawnAccumulator"] doubleValue] + delta;
+        NSTimeInterval spawnAccumulator = [column[@"spawnAccumulator"] doubleValue] + scaledDelta;
         NSTimeInterval headGlyphDwell = [column[@"headGlyphDwell"] doubleValue];
-        NSTimeInterval headGlyphDwellAccumulator = [column[@"headGlyphDwellAccumulator"] doubleValue] + delta;
+        NSTimeInterval headGlyphDwellAccumulator = [column[@"headGlyphDwellAccumulator"] doubleValue] + scaledDelta;
         NSInteger headIndex = [column[@"headIndex"] integerValue];
         NSTimeInterval fadeDuration = [column[@"fadeDuration"] doubleValue];
         if (fadeDuration <= 0) {
@@ -517,7 +584,7 @@ static const CGFloat kMinimumVisibleOpacity = 0.02;
         for (NSMutableDictionary *rowState in rows) {
             NSTimeInterval age = [rowState[@"age"] doubleValue];
             CGFloat opacity = [rowState[@"opacity"] doubleValue];
-            NSTimeInterval dwellAccumulator = [rowState[@"dwellAccumulator"] doubleValue] + delta;
+            NSTimeInterval dwellAccumulator = [rowState[@"dwellAccumulator"] doubleValue] + scaledDelta;
             NSTimeInterval dwellDuration = [rowState[@"dwellDuration"] doubleValue];
 
             while (dwellAccumulator >= dwellDuration) {
@@ -530,11 +597,11 @@ static const CGFloat kMinimumVisibleOpacity = 0.02;
             rowState[@"dwellDuration"] = @(dwellDuration);
 
             if (opacity <= 0.0) {
-                rowState[@"age"] = @(MIN(age + delta, fadeDuration));
+                rowState[@"age"] = @(MIN(age + scaledDelta, fadeDuration));
                 continue;
             }
 
-            age += delta;
+            age += scaledDelta;
             opacity = MAX(0.0, 1.0 - (age / fadeDuration));
             rowState[@"age"] = @(age);
             rowState[@"opacity"] = @(opacity);
@@ -562,13 +629,14 @@ static const CGFloat kMinimumVisibleOpacity = 0.02;
     return SSRandomFloatBetween(1.0, 2.0);
 }
 
-- (NSTimeInterval)fadeDurationForBaseSpeed:(CGFloat)baseSpeed
+- (NSTimeInterval)fadeDurationForBaseSpeed:(CGFloat)baseSpeed referenceHeight:(CGFloat)referenceHeight
 {
     if (baseSpeed <= 0) {
         return kGlyphFadeDuration;
     }
 
-    CGFloat referenceSpeed = 85.0 * (self.characterHeight / 18.0);
+    CGFloat normalizedHeight = MAX(1.0, referenceHeight);
+    CGFloat referenceSpeed = 85.0 * (normalizedHeight / 18.0);
     NSTimeInterval scaledFade = kGlyphFadeDuration * (referenceSpeed / baseSpeed);
 
     return MAX(0.9, MIN(scaledFade, kGlyphFadeDuration * 1.6));
