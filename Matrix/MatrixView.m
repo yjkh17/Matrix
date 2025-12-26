@@ -21,6 +21,8 @@
         _characterWidth = [@"0" sizeWithAttributes:sizingAttributes].width + 1.0;
         _characterHeight = _matrixFont.capHeight + 6.0;
 
+        _fadeLength = isPreview ? 10 : 18;
+
         NSColor *primaryGreen = [NSColor colorWithCalibratedRed:0.0 green:0.9 blue:0.5 alpha:0.9];
         NSColor *trailGreen = [NSColor colorWithCalibratedRed:0.0 green:0.7 blue:0.3 alpha:0.6];
 
@@ -86,7 +88,7 @@
             }
 
             NSString *glyph = glyphs[row];
-            NSDictionary *attributes = (row == 0) ? self.headAttributes : self.glyphAttributes;
+            NSDictionary *attributes = [self attributesForRow:row];
             [glyph drawAtPoint:NSMakePoint(x, y) withAttributes:attributes];
         }
 
@@ -148,6 +150,24 @@
 {
     NSUInteger index = arc4random_uniform((uint32_t)self.glyphSet.count);
     return self.glyphSet[index];
+}
+
+- (NSDictionary<NSAttributedStringKey, id> *)attributesForRow:(NSInteger)row
+{
+    if (row == 0) {
+        return self.headAttributes;
+    }
+
+    NSMutableDictionary<NSAttributedStringKey, id> *attributes = [self.glyphAttributes mutableCopy];
+
+    NSColor *baseTrailColor = self.glyphAttributes[NSForegroundColorAttributeName];
+    CGFloat relativeFadeIndex = MAX(0, row - 1);
+    CGFloat fadeProgress = MIN(1.0, relativeFadeIndex / (CGFloat)self.fadeLength);
+    CGFloat alphaFactor = (1.0 - fadeProgress) * 0.9 + 0.05;
+
+    attributes[NSForegroundColorAttributeName] = [baseTrailColor colorWithAlphaComponent:(baseTrailColor.alphaComponent * alphaFactor)];
+
+    return attributes;
 }
 
 @end

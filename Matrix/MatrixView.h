@@ -19,6 +19,7 @@
 
 @property (nonatomic, strong) NSArray<NSString *> *glyphSet;
 @property (nonatomic, strong) NSMutableArray<NSMutableDictionary *> *columns;
+@property (nonatomic, assign) NSInteger fadeLength;
 
 - (void)resetColumns;
 - (NSString *)randomGlyph;
