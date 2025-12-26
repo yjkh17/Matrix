@@ -47,7 +47,7 @@
     if (self) {
         [self setAnimationTimeInterval:1/30.0];
 
-        _matrixFont = [NSFont monospacedSystemFontOfSize:isPreview ? 10.0 : 14.0 weight:NSFontWeightRegular];
+        _matrixFont = [NSFont monospacedSystemFontOfSize:isPreview ? 10.0 : 14.5 weight:NSFontWeightRegular];
 
         NSDictionary *sizingAttributes = @{ NSFontAttributeName : _matrixFont };
         _characterWidth = [@"0" sizeWithAttributes:sizingAttributes].width + 1.0;
@@ -55,8 +55,8 @@
 
         _fadeLength = isPreview ? 10 : 18;
 
-        NSColor *primaryGreen = [NSColor colorWithCalibratedRed:0.08 green:1.0 blue:0.62 alpha:0.95];
-        NSColor *trailGreen = [NSColor colorWithCalibratedRed:0.04 green:0.94 blue:0.48 alpha:0.72];
+        NSColor *primaryGreen = [NSColor colorWithCalibratedRed:0.70 green:1.0 blue:0.34 alpha:1.0];
+        NSColor *trailGreen = [NSColor colorWithCalibratedRed:0.0 green:0.84 blue:0.32 alpha:0.80];
 
         _glyphAttributes = @{ NSFontAttributeName : _matrixFont,
                               NSForegroundColorAttributeName : trailGreen };
@@ -208,7 +208,7 @@
     if (!self.frameBuffer || sizeChanged) {
         self.frameBuffer = [[NSImage alloc] initWithSize:currentSize];
         [self.frameBuffer lockFocus];
-        [[NSColor colorWithCalibratedWhite:0.02 alpha:1.0] set];
+        [[NSColor colorWithCalibratedRed:0.01 green:0.03 blue:0.015 alpha:1.0] set];
         NSRectFill(NSMakeRect(0, 0, currentSize.width, currentSize.height));
         [self.frameBuffer unlockFocus];
         [self resetColumns];
@@ -254,15 +254,15 @@
         return;
     }
 
-    CGFloat streakWidth = self.characterWidth * 0.42;
-    CGFloat streakHeight = self.characterHeight * 2.2;
+    CGFloat streakWidth = self.characterWidth * 0.36;
+    CGFloat streakHeight = self.characterHeight * 1.6;
 
     NSRect streakRect = NSMakeRect(point.x + (self.characterWidth - streakWidth) * 0.5,
                                    point.y - (streakHeight - self.characterHeight) * 0.45,
                                    streakWidth,
                                    streakHeight);
 
-    NSGradient *trailGradient = [[NSGradient alloc] initWithStartingColor:[color colorWithAlphaComponent:MIN(1.0, color.alphaComponent) * 0.55]
+    NSGradient *trailGradient = [[NSGradient alloc] initWithStartingColor:[color colorWithAlphaComponent:MIN(1.0, color.alphaComponent) * 0.38]
                                                              endingColor:[color colorWithAlphaComponent:0.02]];
     [trailGradient drawInRect:streakRect angle:90.0];
 }
@@ -288,7 +288,7 @@
 
     NSRect imageRect = NSMakeRect(0, 0, self.frameBuffer.size.width, self.frameBuffer.size.height);
 
-    [[NSColor colorWithCalibratedWhite:0.0 alpha:0.02] set];
+    [[NSColor colorWithCalibratedRed:0.0 green:0.05 blue:0.02 alpha:0.08] set];
     NSRectFillUsingOperation(imageRect, NSCompositingOperationSourceOver);
 
     CGFloat bufferHeight = self.frameBuffer.size.height;
@@ -421,7 +421,7 @@
     NSFont *sizedFont = [baseFont fontWithSize:baseFont.pointSize * 1.05];
     NSFont *boldFont = [[NSFontManager sharedFontManager] convertFont:sizedFont toHaveTrait:NSBoldFontMask] ?: sizedFont;
 
-    NSColor *emphasizedColor = [headColor blendedColorWithFraction:(0.18 + 0.3 * pulse) ofColor:[NSColor whiteColor]];
+    NSColor *emphasizedColor = [headColor blendedColorWithFraction:(0.14 + 0.26 * pulse) ofColor:[NSColor whiteColor]];
 
     NSMutableDictionary<NSAttributedStringKey, id> *emphasizedAttributes = [attributes mutableCopy];
     emphasizedAttributes[NSFontAttributeName] = boldFont;
@@ -486,7 +486,7 @@
 
     for (NSInteger fadeIndex = 0; fadeIndex <= length; fadeIndex++) {
         CGFloat fadeProgress = MIN(1.0, fadeIndex / (CGFloat)length);
-        CGFloat alphaFactor = pow((1.0 - fadeProgress), 2.2) * 0.9 + 0.05;
+        CGFloat alphaFactor = pow((1.0 - fadeProgress), 2.2) * 0.85 + 0.02;
 
         NSDictionary *entry = @{ NSFontAttributeName : self.matrixFont,
                                  NSForegroundColorAttributeName : [baseTrailColor colorWithAlphaComponent:(baseTrailColor.alphaComponent * alphaFactor)] };
