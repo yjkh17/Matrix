@@ -167,29 +167,17 @@
     }
 
     self.columnCount = positions.count;
+    self.columnPositions = positions;
 
-    NSInteger rows = (NSInteger)(self.bounds.size.height / self.characterHeight) + self.fadeLength + 4;
+    self.rowsPerColumn = (NSInteger)(self.bounds.size.height / self.characterHeight) + self.fadeLength + 4;
 
     self.columns = [NSMutableArray arrayWithCapacity:self.columnCount];
+    self.nextColumnIndex = 0;
+    self.columnSpawnAccumulator = 0;
+    self.columnSpawnDelay = [self randomColumnSpawnDelay];
 
-    for (NSInteger columnIndex = 0; columnIndex < self.columnCount; columnIndex++) {
-        NSMutableArray<NSString *> *glyphs = [NSMutableArray arrayWithCapacity:rows];
-        for (NSInteger rowIndex = 0; rowIndex < rows; rowIndex++) {
-            [glyphs addObject:[self randomGlyph]];
-        }
-
-        CGFloat baseSpeed = SSRandomFloatBetween(60.0, 180.0) * (self.characterHeight / 18.0);
-
-        NSMutableDictionary *column = [@{
-            @"glyphs" : glyphs,
-            @"offset" : @(SSRandomFloatBetween(0, self.characterHeight)),
-            @"speed" : @(baseSpeed),
-            @"x" : positions[columnIndex],
-            @"thick" : @(SSRandomIntBetween(0, 4) == 0),
-            @"xJitter" : @(SSRandomFloatBetween(-0.8, 0.8))
-        } mutableCopy];
-
-        [self.columns addObject:column];
+    if (self.columnCount > 0) {
+        [self addNextColumn];
     }
 
     [self rebuildFadeAttributes];
@@ -199,6 +187,58 @@
 {
     NSUInteger index = arc4random_uniform((uint32_t)self.glyphSet.count);
     return self.glyphSet[index];
+}
+
+- (NSTimeInterval)randomColumnSpawnDelay
+{
+    return SSRandomFloatBetween(0.05, 0.22);
+}
+
+- (NSMutableDictionary *)buildColumnAtX:(CGFloat)x
+{
+    NSMutableArray<NSString *> *glyphs = [NSMutableArray arrayWithCapacity:self.rowsPerColumn];
+    for (NSInteger rowIndex = 0; rowIndex < self.rowsPerColumn; rowIndex++) {
+        [glyphs addObject:[self randomGlyph]];
+    }
+
+    CGFloat baseSpeed = SSRandomFloatBetween(60.0, 180.0) * (self.characterHeight / 18.0);
+
+    NSMutableDictionary *column = [@{
+        @"glyphs" : glyphs,
+        @"offset" : @(SSRandomFloatBetween(0, self.characterHeight)),
+        @"speed" : @(baseSpeed),
+        @"x" : @(x),
+        @"thick" : @(SSRandomIntBetween(0, 4) == 0),
+        @"xJitter" : @(SSRandomFloatBetween(-0.8, 0.8))
+    } mutableCopy];
+
+    return column;
+}
+
+- (void)addNextColumn
+{
+    if (self.nextColumnIndex >= self.columnPositions.count) {
+        return;
+    }
+
+    CGFloat x = [self.columnPositions[self.nextColumnIndex] doubleValue];
+    [self.columns addObject:[self buildColumnAtX:x]];
+    self.nextColumnIndex += 1;
+}
+
+- (void)spawnColumnsWithDeltaTime:(NSTimeInterval)delta
+{
+    if (self.nextColumnIndex >= self.columnPositions.count) {
+        return;
+    }
+
+    self.columnSpawnAccumulator += delta;
+
+    while (self.columnSpawnAccumulator >= self.columnSpawnDelay && self.nextColumnIndex < self.columnPositions.count) {
+        self.columnSpawnAccumulator -= self.columnSpawnDelay;
+        [self addNextColumn];
+        self.columnSpawnDelay = [self randomColumnSpawnDelay];
+    }
 }
 
 - (NSDictionary<NSAttributedStringKey, id> *)attributesForRow:(NSInteger)row
@@ -237,6 +277,8 @@
     if (delta <= 0) {
         return;
     }
+
+    [self spawnColumnsWithDeltaTime:delta];
 
     for (NSMutableDictionary *column in self.columns) {
         CGFloat offset = [column[@"offset"] doubleValue];
