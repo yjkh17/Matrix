@@ -8,6 +8,9 @@
 #import "MatrixView.h"
 #import <math.h>
 
+static const NSTimeInterval kGlyphFadeDuration = 2.25;
+static const CGFloat kMinimumVisibleOpacity = 0.02;
+
 @interface MatrixView ()
 
 @property (nonatomic, strong) NSFont *matrixFont;
@@ -33,6 +36,8 @@
 - (NSTimeInterval)randomHeadGlyphDwellTime;
 - (void)ensureFrameBuffer;
 - (void)renderFrame;
+- (NSMutableDictionary *)rowStateWithGlyph:(NSString *)glyph opacity:(CGFloat)opacity age:(NSTimeInterval)age;
+- (void)spawnGlyphInColumn:(NSMutableDictionary *)column;
 
 @end
 
@@ -206,28 +211,57 @@
 
 - (NSMutableDictionary *)buildColumnAtX:(CGFloat)x
 {
-    NSMutableArray<NSString *> *glyphs = [NSMutableArray arrayWithCapacity:self.rowsPerColumn];
+    NSMutableArray<NSMutableDictionary *> *rows = [NSMutableArray arrayWithCapacity:self.rowsPerColumn];
     for (NSInteger rowIndex = 0; rowIndex < self.rowsPerColumn; rowIndex++) {
-        [glyphs addObject:[self randomGlyph]];
+        [rows addObject:[self rowStateWithGlyph:[self randomGlyph] opacity:0 age:kGlyphFadeDuration]];
     }
 
     CGFloat baseSpeed = SSRandomFloatBetween(50.0, 120.0) * (self.characterHeight / 18.0);
-
-    CGFloat initialOffset = SSRandomFloatBetween(0, self.characterHeight * 0.6);
+    NSTimeInterval spawnInterval = MAX(0.03, self.characterHeight / baseSpeed);
 
     NSMutableDictionary *column = [@{
-        @"glyphs" : glyphs,
-        @"offset" : @(initialOffset),
-        @"processedRows" : @(floor(initialOffset / self.characterHeight)),
-        @"speed" : @(baseSpeed),
-        @"trailGlyphDwell" : @([self randomGlyphDwellTime]),
-        @"trailGlyphDwellAccumulator" : @(0),
+        @"rows" : rows,
+        @"headIndex" : @(-1),
+        @"spawnAccumulator" : @(SSRandomFloatBetween(0, spawnInterval)),
+        @"spawnInterval" : @(spawnInterval),
         @"headGlyphDwell" : @([self randomHeadGlyphDwellTime]),
         @"headGlyphDwellAccumulator" : @(0),
         @"x" : @(x)
     } mutableCopy];
 
+    NSInteger warmupSteps = arc4random_uniform((uint32_t)MIN(self.rowsPerColumn, 6));
+    for (NSInteger step = 0; step < warmupSteps; step++) {
+        [self spawnGlyphInColumn:column];
+    }
+
     return column;
+}
+
+- (NSMutableDictionary *)rowStateWithGlyph:(NSString *)glyph opacity:(CGFloat)opacity age:(NSTimeInterval)age
+{
+    return [@{ @"glyph" : glyph ?: @"", @"opacity" : @(opacity), @"age" : @(age) } mutableCopy];
+}
+
+- (void)spawnGlyphInColumn:(NSMutableDictionary *)column
+{
+    if (!column) {
+        return;
+    }
+
+    NSMutableArray<NSMutableDictionary *> *rows = column[@"rows"];
+    if (rows.count == 0) {
+        return;
+    }
+
+    NSInteger headIndex = [column[@"headIndex"] integerValue];
+    headIndex = (headIndex + 1) % rows.count;
+
+    NSMutableDictionary *rowState = rows[headIndex];
+    rowState[@"glyph"] = [self randomGlyph];
+    rowState[@"age"] = @(0);
+    rowState[@"opacity"] = @(1.0);
+
+    column[@"headIndex"] = @(headIndex);
 }
 
 - (void)addNextColumn
@@ -258,16 +292,19 @@
 
     for (NSInteger columnIndex = 0; columnIndex < self.columns.count; columnIndex++) {
         NSMutableDictionary *column = self.columns[columnIndex];
-        NSMutableArray<NSString *> *glyphs = column[@"glyphs"];
-        CGFloat offset = [column[@"offset"] doubleValue];
-
-        NSInteger rows = glyphs.count;
+        NSArray<NSMutableDictionary *> *rows = column[@"rows"];
+        NSInteger headIndex = [column[@"headIndex"] integerValue];
         CGFloat x = [column[@"x"] doubleValue];
 
-        CGFloat headY = bufferHeight - self.characterHeight - offset;
+        for (NSInteger row = 0; row < rows.count; row++) {
+            NSMutableDictionary *rowState = rows[row];
+            CGFloat opacity = [rowState[@"opacity"] doubleValue];
 
-        for (NSInteger row = 0; row < rows; row++) {
-            CGFloat y = headY + (row * self.characterHeight);
+            if (opacity < kMinimumVisibleOpacity) {
+                continue;
+            }
+
+            CGFloat y = bufferHeight - self.characterHeight - (row * self.characterHeight);
 
             if (y > bufferHeight + self.characterHeight) {
                 continue;
@@ -277,14 +314,15 @@
                 break;
             }
 
-            NSString *glyph = glyphs[row];
-            NSDictionary *attributes = [self attributesForRow:row inColumn:column];
+            NSString *glyph = rowState[@"glyph"];
+            BOOL isHead = (row == headIndex);
+            NSDictionary *attributes = [self attributesForRow:row opacity:opacity isHead:isHead];
 
             if (!attributes) {
                 continue;
             }
 
-            if (row == 0) {
+            if (isHead) {
                 [self drawHeadGlyph:glyph atPoint:NSMakePoint(x, y) withAttributes:attributes];
             } else {
                 [glyph drawAtPoint:NSMakePoint(x, y) withAttributes:attributes];
@@ -311,13 +349,26 @@
     }
 }
 
-- (NSDictionary<NSAttributedStringKey, id> *)attributesForRow:(NSInteger)row inColumn:(NSDictionary *)column
+- (NSDictionary<NSAttributedStringKey, id> *)attributesForRow:(NSInteger)row opacity:(CGFloat)opacity isHead:(BOOL)isHead
 {
-    if (row == 0) {
-        return self.headAttributes;
+    NSDictionary *baseAttributes = isHead ? self.headAttributes : self.glyphAttributes;
+    NSMutableDictionary *attributes = [baseAttributes mutableCopy];
+
+    NSColor *color = baseAttributes[NSForegroundColorAttributeName];
+    if (color) {
+        attributes[NSForegroundColorAttributeName] = [color colorWithAlphaComponent:opacity * color.alphaComponent];
     }
 
-    return self.glyphAttributes;
+    if (isHead) {
+        NSShadow *shadow = baseAttributes[NSShadowAttributeName];
+        if (shadow) {
+            NSShadow *shadowCopy = [shadow copy];
+            shadowCopy.shadowColor = [shadow.shadowColor colorWithAlphaComponent:opacity];
+            attributes[NSShadowAttributeName] = shadowCopy;
+        }
+    }
+
+    return attributes;
 }
 
 - (void)drawHeadGlyph:(NSString *)glyph atPoint:(NSPoint)point withAttributes:(NSDictionary<NSAttributedStringKey, id> *)attributes
@@ -333,63 +384,50 @@
 
     [self spawnColumnsWithDeltaTime:delta];
 
-    CGFloat bufferHeight = self.frameBuffer.size.height;
-
     for (NSInteger columnIndex = 0; columnIndex < self.columns.count; columnIndex++) {
         NSMutableDictionary *column = self.columns[columnIndex];
-        CGFloat offset = [column[@"offset"] doubleValue];
-        CGFloat speed = [column[@"speed"] doubleValue];
-        NSInteger processedRows = [column[@"processedRows"] integerValue];
-        NSTimeInterval trailGlyphDwell = [column[@"trailGlyphDwell"] doubleValue];
-        NSTimeInterval trailGlyphDwellAccumulator = [column[@"trailGlyphDwellAccumulator"] doubleValue] + delta;
+        NSMutableArray<NSMutableDictionary *> *rows = column[@"rows"];
+        NSTimeInterval spawnInterval = [column[@"spawnInterval"] doubleValue];
+        NSTimeInterval spawnAccumulator = [column[@"spawnAccumulator"] doubleValue] + delta;
         NSTimeInterval headGlyphDwell = [column[@"headGlyphDwell"] doubleValue];
         NSTimeInterval headGlyphDwellAccumulator = [column[@"headGlyphDwellAccumulator"] doubleValue] + delta;
-        NSMutableArray<NSString *> *glyphs = column[@"glyphs"];
+        NSInteger headIndex = [column[@"headIndex"] integerValue];
 
-        offset += speed * delta;
-
-        NSInteger completedRows = (NSInteger)floor(offset / self.characterHeight);
-        NSInteger rowsToProcess = MAX(0, completedRows - processedRows);
-        NSInteger processedThisFrame = 0;
-
-        while (rowsToProcess > 0 && trailGlyphDwellAccumulator >= trailGlyphDwell) {
-            trailGlyphDwellAccumulator -= trailGlyphDwell;
-            [glyphs insertObject:[self randomGlyph] atIndex:0];
-            [glyphs removeLastObject];
-            processedThisFrame += 1;
-            rowsToProcess -= 1;
-            trailGlyphDwell = [self randomGlyphDwellTime];
+        while (spawnAccumulator >= spawnInterval) {
+            spawnAccumulator -= spawnInterval;
+            [self spawnGlyphInColumn:column];
+            spawnInterval = MAX(0.02, (spawnInterval + [self randomGlyphDwellTime]) * 0.5);
+            headIndex = [column[@"headIndex"] integerValue];
         }
 
-        while (headGlyphDwellAccumulator >= headGlyphDwell) {
-            headGlyphDwellAccumulator -= headGlyphDwell;
-            if (glyphs.count > 0) {
-                glyphs[0] = [self randomGlyph];
+        if (headIndex >= 0 && headIndex < rows.count) {
+            while (headGlyphDwellAccumulator >= headGlyphDwell) {
+                headGlyphDwellAccumulator -= headGlyphDwell;
+                rows[headIndex][@"glyph"] = [self randomGlyph];
+                headGlyphDwell = [self randomHeadGlyphDwellTime];
             }
-            headGlyphDwell = [self randomHeadGlyphDwellTime];
         }
 
-        column[@"offset"] = @(offset);
-        column[@"processedRows"] = @(processedRows + processedThisFrame);
-        column[@"trailGlyphDwell"] = @(trailGlyphDwell);
-        column[@"trailGlyphDwellAccumulator"] = @(trailGlyphDwellAccumulator);
+        for (NSMutableDictionary *rowState in rows) {
+            NSTimeInterval age = [rowState[@"age"] doubleValue];
+            CGFloat opacity = [rowState[@"opacity"] doubleValue];
+
+            if (opacity <= 0.0) {
+                rowState[@"age"] = @(MIN(age + delta, kGlyphFadeDuration));
+                continue;
+            }
+
+            age += delta;
+            opacity = MAX(0.0, 1.0 - (age / kGlyphFadeDuration));
+            rowState[@"age"] = @(age);
+            rowState[@"opacity"] = @(opacity);
+        }
+
+        column[@"spawnAccumulator"] = @(spawnAccumulator);
+        column[@"spawnInterval"] = @(spawnInterval);
         column[@"headGlyphDwell"] = @(headGlyphDwell);
         column[@"headGlyphDwellAccumulator"] = @(headGlyphDwellAccumulator);
-
-        if (offset > bufferHeight + self.characterHeight) {
-            [self recycleColumnAtIndex:columnIndex];
-        }
     }
-}
-
-- (void)recycleColumnAtIndex:(NSInteger)columnIndex
-{
-    if (columnIndex < 0 || columnIndex >= self.columnPositions.count) {
-        return;
-    }
-
-    CGFloat x = [self.columnPositions[columnIndex] doubleValue];
-    self.columns[columnIndex] = [self buildColumnAtX:x];
 }
 
 - (NSTimeInterval)randomGlyphDwellTime
