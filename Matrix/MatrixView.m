@@ -148,11 +148,19 @@
     CGFloat width = self.bounds.size.width;
     CGFloat height = self.bounds.size.height;
 
-    // For now, keep things simple: render a single raining column instead of filling the screen.
-    CGFloat singleX = SSRandomFloatBetween(self.characterWidth, MAX(self.characterWidth, width - self.characterWidth));
-    self.columnPositions = @[ @(singleX) ];
+    CGFloat spacing = self.characterWidth * 0.9;
+    NSInteger columnCount = MAX(1, (NSInteger)floor(width / spacing));
+    CGFloat xStart = (width - (columnCount * spacing)) * 0.5;
 
-    NSInteger columnCount = self.columnPositions.count;
+    NSMutableArray<NSNumber *> *positions = [NSMutableArray arrayWithCapacity:columnCount];
+    for (NSInteger columnIndex = 0; columnIndex < columnCount; columnIndex++) {
+        CGFloat jitter = SSRandomFloatBetween(-self.characterWidth * 0.15, self.characterWidth * 0.15);
+        CGFloat x = xStart + (columnIndex * spacing) + jitter;
+        x = MIN(MAX(self.characterWidth * 0.5, x), width - self.characterWidth * 1.5);
+        [positions addObject:@(x)];
+    }
+
+    self.columnPositions = positions;
 
     NSInteger maxFadeLength = self.fadeLength + 8;
     self.rowsPerColumn = (NSInteger)(height / self.characterHeight) + maxFadeLength + 6;
