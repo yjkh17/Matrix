@@ -229,9 +229,12 @@
     NSInteger fadeLength = MAX(4, self.fadeLength + SSRandomIntBetween(-6, 8));
     NSArray<NSDictionary<NSAttributedStringKey, id> *> *fadeAttributes = [self buildFadeAttributesWithLength:fadeLength];
 
+    CGFloat initialOffset = SSRandomFloatBetween(0, self.characterHeight);
+
     NSMutableDictionary *column = [@{
         @"glyphs" : glyphs,
-        @"offset" : @(SSRandomFloatBetween(0, self.characterHeight)),
+        @"offset" : @(initialOffset),
+        @"processedRows" : @(floor(initialOffset / self.characterHeight)),
         @"speed" : @(baseSpeed),
         @"x" : @(x),
         @"thick" : @(SSRandomIntBetween(0, 4) == 0),
@@ -423,12 +426,15 @@
     for (NSMutableDictionary *column in self.columns) {
         CGFloat offset = [column[@"offset"] doubleValue];
         CGFloat speed = [column[@"speed"] doubleValue];
+        NSInteger processedRows = [column[@"processedRows"] integerValue];
         NSMutableArray<NSString *> *glyphs = column[@"glyphs"];
 
         offset += speed * delta;
 
-        while (offset >= self.characterHeight) {
-            offset -= self.characterHeight;
+        NSInteger completedRows = (NSInteger)floor(offset / self.characterHeight);
+        NSInteger rowsToProcess = MAX(0, completedRows - processedRows);
+
+        for (NSInteger step = 0; step < rowsToProcess; step++) {
             [glyphs insertObject:[self randomGlyph] atIndex:0];
             [glyphs removeLastObject];
         }
@@ -437,6 +443,7 @@
         jitter = MIN(MAX(jitter + SSRandomFloatBetween(-0.1, 0.1), -1.25), 1.25);
 
         column[@"offset"] = @(offset);
+        column[@"processedRows"] = @(completedRows);
         column[@"xJitter"] = @(jitter);
     }
 }
