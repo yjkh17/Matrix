@@ -13,7 +13,6 @@
 @property (nonatomic, strong) NSFont *matrixFont;
 @property (nonatomic, strong) NSDictionary<NSAttributedStringKey, id> *glyphAttributes;
 @property (nonatomic, strong) NSDictionary<NSAttributedStringKey, id> *headAttributes;
-@property (nonatomic, strong) NSArray<NSDictionary<NSAttributedStringKey, id> *> *fadeAttributes;
 
 @property (nonatomic, assign) CGFloat characterWidth;
 @property (nonatomic, assign) CGFloat characterHeight;
@@ -26,17 +25,12 @@
 @property (nonatomic, assign) NSInteger nextColumnIndex;
 @property (nonatomic, assign) NSTimeInterval columnSpawnAccumulator;
 @property (nonatomic, assign) NSTimeInterval columnSpawnDelay;
-@property (nonatomic, assign) NSInteger fadeLength;
-@property (nonatomic, strong) NSShadow *headGlowShadow;
 @property (nonatomic, strong) NSImage *frameBuffer;
 
 - (void)resetColumns;
 - (NSString *)randomGlyph;
-- (NSArray<NSDictionary<NSAttributedStringKey, id> *> *)buildFadeAttributesWithLength:(NSInteger)length;
 - (void)ensureFrameBuffer;
 - (void)renderFrame;
-- (void)drawGlyphTrailAtPoint:(NSPoint)point withColor:(NSColor *)color;
-- (void)drawColumnGlowAtX:(CGFloat)x width:(CGFloat)width height:(CGFloat)height intensity:(CGFloat)intensity headOffset:(CGFloat)headOffset;
 
 @end
 
@@ -48,16 +42,14 @@
     if (self) {
         [self setAnimationTimeInterval:1/30.0];
 
-        _matrixFont = [NSFont monospacedSystemFontOfSize:isPreview ? 10.0 : 14.5 weight:NSFontWeightRegular];
+        _matrixFont = [NSFont monospacedSystemFontOfSize:isPreview ? 18.0 : 26.0 weight:NSFontWeightRegular];
 
         NSDictionary *sizingAttributes = @{ NSFontAttributeName : _matrixFont };
         _characterWidth = [@"0" sizeWithAttributes:sizingAttributes].width + 1.0;
         _characterHeight = _matrixFont.ascender - _matrixFont.descender + _matrixFont.leading;
 
-        _fadeLength = isPreview ? 10 : 18;
-
-        NSColor *primaryGreen = [NSColor colorWithCalibratedRed:0.74 green:1.0 blue:0.46 alpha:1.0];
-        NSColor *trailGreen = [NSColor colorWithCalibratedRed:0.0 green:0.92 blue:0.36 alpha:0.9];
+        NSColor *primaryGreen = [NSColor colorWithCalibratedRed:0.65 green:1.0 blue:0.45 alpha:1.0];
+        NSColor *trailGreen = [NSColor colorWithCalibratedRed:0.0 green:0.95 blue:0.45 alpha:1.0];
 
         _glyphAttributes = @{ NSFontAttributeName : _matrixFont,
                               NSForegroundColorAttributeName : trailGreen };
@@ -79,10 +71,6 @@
         self.wantsLayer = YES;
         [self updateBackingScaleFactor];
         [self resetColumns];
-
-        _headGlowShadow = [[NSShadow alloc] init];
-        _headGlowShadow.shadowBlurRadius = 14.0;
-        _headGlowShadow.shadowOffset = NSZeroSize;
     }
     return self;
 }
@@ -151,27 +139,18 @@
     CGFloat width = self.bounds.size.width;
     CGFloat height = self.bounds.size.height;
 
-    CGFloat spacing = self.characterWidth * 0.9;
-    NSInteger columnCount = MAX(1, (NSInteger)floor(width / spacing));
-    CGFloat xStart = (width - (columnCount * spacing)) * 0.5;
+    NSInteger columnCount = 1;
+    CGFloat spacing = self.characterWidth * 1.1;
+    CGFloat xStart = (width - spacing) * 0.5;
 
     NSMutableArray<NSNumber *> *positions = [NSMutableArray arrayWithCapacity:columnCount];
-    for (NSInteger columnIndex = 0; columnIndex < columnCount; columnIndex++) {
-        CGFloat jitter = SSRandomFloatBetween(-self.characterWidth * 0.15, self.characterWidth * 0.15);
-        CGFloat x = xStart + (columnIndex * spacing) + jitter;
-        x = MIN(MAX(self.characterWidth * 0.5, x), width - self.characterWidth * 1.5);
-        [positions addObject:@(x)];
-    }
-
-    for (NSInteger shuffleIndex = positions.count - 1; shuffleIndex > 0; shuffleIndex--) {
-        u_int32_t swapIndex = arc4random_uniform((u_int32_t)(shuffleIndex + 1));
-        [positions exchangeObjectAtIndex:shuffleIndex withObjectAtIndex:swapIndex];
-    }
+    CGFloat x = xStart + (spacing * 0.5);
+    x = MIN(MAX(self.characterWidth * 0.5, x), width - self.characterWidth * 1.5);
+    [positions addObject:@(x)];
 
     self.columnPositions = positions;
 
-    NSInteger maxFadeLength = self.fadeLength + 8;
-    self.rowsPerColumn = (NSInteger)(height / self.characterHeight) + maxFadeLength + 6;
+    self.rowsPerColumn = (NSInteger)ceil(height / self.characterHeight) + 4;
 
     self.columns = [NSMutableArray arrayWithCapacity:columnCount];
     self.nextColumnIndex = 0;
@@ -181,8 +160,6 @@
     if (columnCount > 0) {
         [self addNextColumn];
     }
-
-    [self rebuildFadeAttributes];
 }
 
 - (NSString *)randomGlyph
@@ -223,77 +200,19 @@
         [glyphs addObject:[self randomGlyph]];
     }
 
-    CGFloat baseSpeed = SSRandomFloatBetween(28.0, 260.0) * (self.characterHeight / 18.0);
-    if (SSRandomIntBetween(0, 4) == 0) {
-        baseSpeed *= SSRandomFloatBetween(0.45, 0.85);
-    }
+    CGFloat baseSpeed = SSRandomFloatBetween(70.0, 140.0) * (self.characterHeight / 18.0);
 
-    NSInteger fadeLength = MAX(4, self.fadeLength + SSRandomIntBetween(-6, 8));
-    NSArray<NSDictionary<NSAttributedStringKey, id> *> *fadeAttributes = [self buildFadeAttributesWithLength:fadeLength];
-
-    CGFloat initialOffset = SSRandomFloatBetween(0, self.characterHeight);
+    CGFloat initialOffset = SSRandomFloatBetween(0, self.characterHeight * 0.6);
 
     NSMutableDictionary *column = [@{
         @"glyphs" : glyphs,
         @"offset" : @(initialOffset),
         @"processedRows" : @(floor(initialOffset / self.characterHeight)),
         @"speed" : @(baseSpeed),
-        @"x" : @(x),
-        @"thick" : @(SSRandomIntBetween(0, 4) == 0),
-        @"xJitter" : @(SSRandomFloatBetween(-0.8, 0.8)),
-        @"altXOffset" : @(SSRandomFloatBetween(-2.0, 2.0)),
-        @"fadeLength" : @(fadeLength),
-        @"fadeAttributes" : fadeAttributes
+        @"x" : @(x)
     } mutableCopy];
 
     return column;
-}
-
-- (void)drawGlyphTrailAtPoint:(NSPoint)point withColor:(NSColor *)color
-{
-    if (!color) {
-        return;
-    }
-
-    CGFloat streakWidth = self.characterWidth * 0.36;
-    CGFloat streakHeight = self.characterHeight * 1.6;
-
-    NSRect streakRect = NSMakeRect(point.x + (self.characterWidth - streakWidth) * 0.5,
-                                   point.y - (streakHeight - self.characterHeight) * 0.45,
-                                   streakWidth,
-                                   streakHeight);
-
-    NSGradient *trailGradient = [[NSGradient alloc] initWithStartingColor:[color colorWithAlphaComponent:MIN(1.0, color.alphaComponent) * 0.38]
-                                                             endingColor:[color colorWithAlphaComponent:0.02]];
-    [trailGradient drawInRect:streakRect angle:90.0];
-}
-
-- (void)drawColumnGlowAtX:(CGFloat)x width:(CGFloat)width height:(CGFloat)height intensity:(CGFloat)intensity headOffset:(CGFloat)headOffset
-{
-    if (intensity <= 0.0) {
-        return;
-    }
-
-    NSColor *coreColor = [NSColor colorWithCalibratedRed:0.45 green:1.0 blue:0.55 alpha:0.55 * intensity];
-    NSColor *rimColor = [coreColor colorWithAlphaComponent:0.02 * intensity];
-
-    CGFloat glowHeight = height + self.characterHeight * 2.5;
-    NSRect glowRect = NSMakeRect(x - width * 0.5,
-                                 headOffset - self.characterHeight * 1.25,
-                                 width,
-                                 glowHeight);
-
-    NSGradient *glow = [[NSGradient alloc] initWithColorsAndLocations:
-                        coreColor, 0.18,
-                        [coreColor colorWithAlphaComponent:0.32 * intensity], 0.35,
-                        [coreColor colorWithAlphaComponent:0.16 * intensity], 0.62,
-                        rimColor, 0.98,
-                        nil];
-
-    [NSGraphicsContext saveGraphicsState];
-    [[NSBezierPath bezierPathWithRoundedRect:glowRect xRadius:width * 0.35 yRadius:self.characterHeight] addClip];
-    [glow drawInRect:glowRect angle:90.0];
-    [NSGraphicsContext restoreGraphicsState];
 }
 
 - (void)addNextColumn
@@ -317,8 +236,8 @@
 
     NSRect imageRect = NSMakeRect(0, 0, self.frameBuffer.size.width, self.frameBuffer.size.height);
 
-    [[NSColor colorWithCalibratedRed:0.0 green:0.05 blue:0.02 alpha:0.08] set];
-    NSRectFillUsingOperation(imageRect, NSCompositingOperationSourceOver);
+    [[NSColor blackColor] set];
+    NSRectFill(imageRect);
 
     CGFloat bufferHeight = self.frameBuffer.size.height;
 
@@ -329,27 +248,8 @@
 
         NSInteger rows = glyphs.count;
         CGFloat x = [column[@"x"] doubleValue];
-        BOOL thick = [column[@"thick"] boolValue];
-        CGFloat jitter = [column[@"xJitter"] doubleValue];
-        CGFloat altOffset = [column[@"altXOffset"] doubleValue];
 
         CGFloat headY = bufferHeight - self.characterHeight - offset;
-
-        CGFloat beamWidth = self.characterWidth * (thick ? 2.7 : 2.2);
-        CGFloat headCenterY = headY + self.characterHeight * 0.5;
-        CGFloat glowIntensity = 0.82 + (thick ? 0.1 : 0.0);
-        [self drawColumnGlowAtX:x + jitter + self.characterWidth * 0.5
-                            width:beamWidth
-                           height:bufferHeight
-                        intensity:glowIntensity
-                       headOffset:headCenterY];
-        if (thick) {
-            [self drawColumnGlowAtX:x + jitter + altOffset + self.characterWidth * 0.5
-                                width:beamWidth * 0.92
-                               height:bufferHeight
-                            intensity:glowIntensity * 0.9
-                           headOffset:headCenterY];
-        }
 
         for (NSInteger row = 0; row < rows; row++) {
             CGFloat y = headY + (row * self.characterHeight);
@@ -370,21 +270,9 @@
             }
 
             if (row == 0) {
-                [self drawHeadGlyph:glyph atPoint:NSMakePoint(x + jitter, y) withAttributes:attributes];
-                if (thick) {
-                    CGFloat altX = x + jitter + altOffset;
-                    [self drawHeadGlyph:glyph atPoint:NSMakePoint(altX, y) withAttributes:attributes];
-                }
+                [self drawHeadGlyph:glyph atPoint:NSMakePoint(x, y) withAttributes:attributes];
             } else {
-                NSColor *trailColor = attributes[NSForegroundColorAttributeName];
-
-                [self drawGlyphTrailAtPoint:NSMakePoint(x + jitter, y) withColor:trailColor];
-                [glyph drawAtPoint:NSMakePoint(x + jitter, y) withAttributes:attributes];
-                if (thick) {
-                    CGFloat altX = x + jitter + altOffset;
-                    [self drawGlyphTrailAtPoint:NSMakePoint(altX, y) withColor:trailColor];
-                    [glyph drawAtPoint:NSMakePoint(altX, y) withAttributes:attributes];
-                }
+                [glyph drawAtPoint:NSMakePoint(x, y) withAttributes:attributes];
             }
         }
 
@@ -414,76 +302,12 @@
         return self.headAttributes;
     }
 
-    NSInteger fadeIndex = row - 1;
-
-    NSInteger columnFadeLength = [column[@"fadeLength"] integerValue];
-    NSArray<NSDictionary<NSAttributedStringKey, id> *> *columnFadeAttributes = column[@"fadeAttributes"] ?: self.fadeAttributes;
-
-    if (fadeIndex > columnFadeLength) {
-        return nil;
-    }
-
-    NSInteger clampedIndex = MIN((NSInteger)columnFadeAttributes.count - 1, MAX(0, fadeIndex));
-    return columnFadeAttributes[clampedIndex];
+    return self.glyphAttributes;
 }
 
 - (void)drawHeadGlyph:(NSString *)glyph atPoint:(NSPoint)point withAttributes:(NSDictionary<NSAttributedStringKey, id> *)attributes
 {
-    NSColor *headColor = attributes[NSForegroundColorAttributeName];
-
-    CGFloat bufferHeight = self.frameBuffer.size.height;
-    CGFloat freshness = 0.0;
-    if (bufferHeight > 0) {
-        CGFloat headOffset = point.y - (bufferHeight - self.characterHeight);
-        headOffset = MAX(0.0, MIN(self.characterHeight, headOffset));
-        freshness = 1.0 - (headOffset / self.characterHeight);
-    }
-
-    CGFloat pulse = MAX(0.0, (sin(self.lastFrameTimestamp * 10.0) + 1.0) * 0.5 * freshness);
-    CGFloat glowAlpha = 0.45 + 0.35 * pulse;
-
-    NSPoint glowCenter = NSMakePoint(point.x + self.characterWidth * 0.5, point.y + self.characterHeight * 0.5);
-    CGFloat glowRadiusX = self.characterWidth * 2.1;
-    CGFloat glowRadiusY = self.characterHeight * 2.1;
-    NSRect glowRect = NSMakeRect(glowCenter.x - glowRadiusX * 0.5,
-                                 glowCenter.y - glowRadiusY * 0.5,
-                                 glowRadiusX,
-                                 glowRadiusY);
-
-    NSGradient *headGlow = [[NSGradient alloc] initWithStartingColor:[headColor colorWithAlphaComponent:glowAlpha]
-                                                        endingColor:[headColor colorWithAlphaComponent:0.02]];
-    [headGlow drawInRect:glowRect relativeCenterPosition:NSZeroPoint];
-
-    CGFloat highlightAlpha = 0.18 + 0.32 * pulse;
-    if (highlightAlpha > 0.0) {
-        NSGradient *pulseGradient = [[NSGradient alloc] initWithStartingColor:[[NSColor whiteColor] colorWithAlphaComponent:highlightAlpha]
-                                                                 endingColor:[headColor colorWithAlphaComponent:0.0]];
-        [pulseGradient drawInRect:NSInsetRect(glowRect, -self.characterWidth * 0.2, -self.characterHeight * 0.2)
-             relativeCenterPosition:NSZeroPoint];
-    }
-
-    NSFont *baseFont = attributes[NSFontAttributeName];
-    NSFont *sizedFont = [baseFont fontWithSize:baseFont.pointSize * 1.05];
-    NSFont *boldFont = [[NSFontManager sharedFontManager] convertFont:sizedFont toHaveTrait:NSBoldFontMask] ?: sizedFont;
-
-    NSColor *emphasizedColor = [headColor blendedColorWithFraction:(0.20 + 0.32 * pulse) ofColor:[NSColor whiteColor]];
-
-    NSMutableDictionary<NSAttributedStringKey, id> *emphasizedAttributes = [attributes mutableCopy];
-    emphasizedAttributes[NSFontAttributeName] = boldFont;
-    emphasizedAttributes[NSForegroundColorAttributeName] = emphasizedColor ?: headColor;
-
-    [NSGraphicsContext saveGraphicsState];
-    self.headGlowShadow.shadowColor = [headColor colorWithAlphaComponent:MIN(1.0, 0.85 + 0.3 * pulse)];
-    [self.headGlowShadow set];
-    [glyph drawAtPoint:NSMakePoint(point.x, point.y) withAttributes:emphasizedAttributes];
-    [NSGraphicsContext restoreGraphicsState];
-
-    NSDictionary *punchAttributes = @{
-        NSFontAttributeName : boldFont,
-        NSForegroundColorAttributeName : [headColor colorWithAlphaComponent:0.65 + 0.2 * pulse]
-    };
-
-    [glyph drawAtPoint:point withAttributes:punchAttributes];
+    [glyph drawAtPoint:point withAttributes:attributes];
 }
 
 - (void)updateColumnsWithDeltaTime:(NSTimeInterval)delta
@@ -510,35 +334,9 @@
             [glyphs removeLastObject];
         }
 
-        CGFloat jitter = [column[@"xJitter"] doubleValue];
-        jitter = MIN(MAX(jitter + SSRandomFloatBetween(-0.1, 0.1), -1.25), 1.25);
-
         column[@"offset"] = @(offset);
         column[@"processedRows"] = @(completedRows);
-        column[@"xJitter"] = @(jitter);
     }
-}
-
-- (void)rebuildFadeAttributes
-{
-    self.fadeAttributes = [self buildFadeAttributesWithLength:self.fadeLength];
-}
-
-- (NSArray<NSDictionary<NSAttributedStringKey, id> *> *)buildFadeAttributesWithLength:(NSInteger)length
-{
-    NSMutableArray<NSDictionary<NSAttributedStringKey, id> *> *attributes = [NSMutableArray arrayWithCapacity:length + 1];
-    NSColor *baseTrailColor = self.glyphAttributes[NSForegroundColorAttributeName];
-
-    for (NSInteger fadeIndex = 0; fadeIndex <= length; fadeIndex++) {
-        CGFloat fadeProgress = MIN(1.0, fadeIndex / (CGFloat)length);
-        CGFloat alphaFactor = pow((1.0 - fadeProgress), 1.8) * 0.9 + 0.05;
-
-        NSDictionary *entry = @{ NSFontAttributeName : self.matrixFont,
-                                 NSForegroundColorAttributeName : [baseTrailColor colorWithAlphaComponent:(baseTrailColor.alphaComponent * alphaFactor)] };
-        [attributes addObject:entry];
-    }
-
-    return attributes;
 }
 
 - (void)updateBackingScaleFactor
