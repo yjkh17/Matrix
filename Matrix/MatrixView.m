@@ -37,6 +37,7 @@ static const CGFloat kMinimumVisibleOpacity = 0.02;
 - (NSArray<NSString *> *)buildWeightedGlyphSet;
 - (NSTimeInterval)randomGlyphDwellTime;
 - (NSTimeInterval)randomHeadGlyphDwellTime;
+- (NSTimeInterval)randomRowGlyphDwellTime;
 - (void)ensureFrameBuffer;
 - (void)renderFrame;
 - (NSMutableDictionary *)rowStateWithGlyph:(NSString *)glyph opacity:(CGFloat)opacity age:(NSTimeInterval)age;
@@ -300,7 +301,11 @@ static const CGFloat kMinimumVisibleOpacity = 0.02;
 
 - (NSMutableDictionary *)rowStateWithGlyph:(NSString *)glyph opacity:(CGFloat)opacity age:(NSTimeInterval)age
 {
-    return [@{ @"glyph" : glyph ?: @"", @"opacity" : @(opacity), @"age" : @(age) } mutableCopy];
+    return [@{ @"glyph" : glyph ?: @"",
+               @"opacity" : @(opacity),
+               @"age" : @(age),
+               @"dwellAccumulator" : @(0),
+               @"dwellDuration" : @([self randomRowGlyphDwellTime]) } mutableCopy];
 }
 
 - (void)spawnGlyphInColumn:(NSMutableDictionary *)column
@@ -321,6 +326,8 @@ static const CGFloat kMinimumVisibleOpacity = 0.02;
     rowState[@"glyph"] = [self randomGlyph];
     rowState[@"age"] = @(0);
     rowState[@"opacity"] = @(1.0);
+    rowState[@"dwellAccumulator"] = @(0);
+    rowState[@"dwellDuration"] = @([self randomRowGlyphDwellTime]);
 
     column[@"headIndex"] = @(headIndex);
 }
@@ -502,6 +509,17 @@ static const CGFloat kMinimumVisibleOpacity = 0.02;
         for (NSMutableDictionary *rowState in rows) {
             NSTimeInterval age = [rowState[@"age"] doubleValue];
             CGFloat opacity = [rowState[@"opacity"] doubleValue];
+            NSTimeInterval dwellAccumulator = [rowState[@"dwellAccumulator"] doubleValue] + delta;
+            NSTimeInterval dwellDuration = [rowState[@"dwellDuration"] doubleValue];
+
+            while (dwellAccumulator >= dwellDuration) {
+                dwellAccumulator -= dwellDuration;
+                rowState[@"glyph"] = [self randomGlyph];
+                dwellDuration = [self randomRowGlyphDwellTime];
+            }
+
+            rowState[@"dwellAccumulator"] = @(dwellAccumulator);
+            rowState[@"dwellDuration"] = @(dwellDuration);
 
             if (opacity <= 0.0) {
                 rowState[@"age"] = @(MIN(age + delta, kGlyphFadeDuration));
@@ -529,6 +547,11 @@ static const CGFloat kMinimumVisibleOpacity = 0.02;
 - (NSTimeInterval)randomHeadGlyphDwellTime
 {
     return SSRandomFloatBetween(0.025, 0.08);
+}
+
+- (NSTimeInterval)randomRowGlyphDwellTime
+{
+    return SSRandomFloatBetween(1.0, 2.0);
 }
 
 - (void)updateBackingScaleFactor
