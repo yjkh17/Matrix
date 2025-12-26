@@ -30,6 +30,7 @@
 - (void)resetColumns;
 - (NSString *)randomGlyph;
 - (NSTimeInterval)randomGlyphDwellTime;
+- (NSTimeInterval)randomHeadGlyphDwellTime;
 - (void)ensureFrameBuffer;
 - (void)renderFrame;
 
@@ -55,8 +56,14 @@
         _glyphAttributes = @{ NSFontAttributeName : _matrixFont,
                               NSForegroundColorAttributeName : trailGreen };
 
+        NSShadow *headGlow = [[NSShadow alloc] init];
+        headGlow.shadowColor = [primaryGreen colorWithAlphaComponent:0.85];
+        headGlow.shadowBlurRadius = 8.0;
+        headGlow.shadowOffset = NSZeroSize;
+
         _headAttributes = @{ NSFontAttributeName : _matrixFont,
-                             NSForegroundColorAttributeName : primaryGreen };
+                             NSForegroundColorAttributeName : primaryGreen,
+                             NSShadowAttributeName : headGlow };
 
         _glyphSet = @[ @"ｱ", @"ｲ", @"ｳ", @"ｴ", @"ｵ", @"ｶ", @"ｷ", @"ｸ", @"ｹ", @"ｺ",
                        @"ｻ", @"ｼ", @"ｽ", @"ｾ", @"ｿ", @"ﾀ", @"ﾁ", @"ﾂ", @"ﾃ", @"ﾄ",
@@ -213,8 +220,10 @@
         @"offset" : @(initialOffset),
         @"processedRows" : @(floor(initialOffset / self.characterHeight)),
         @"speed" : @(baseSpeed),
-        @"glyphDwell" : @([self randomGlyphDwellTime]),
-        @"glyphDwellAccumulator" : @(0),
+        @"trailGlyphDwell" : @([self randomGlyphDwellTime]),
+        @"trailGlyphDwellAccumulator" : @(0),
+        @"headGlyphDwell" : @([self randomHeadGlyphDwellTime]),
+        @"headGlyphDwellAccumulator" : @(0),
         @"x" : @(x)
     } mutableCopy];
 
@@ -331,8 +340,10 @@
         CGFloat offset = [column[@"offset"] doubleValue];
         CGFloat speed = [column[@"speed"] doubleValue];
         NSInteger processedRows = [column[@"processedRows"] integerValue];
-        NSTimeInterval glyphDwell = [column[@"glyphDwell"] doubleValue];
-        NSTimeInterval glyphDwellAccumulator = [column[@"glyphDwellAccumulator"] doubleValue] + delta;
+        NSTimeInterval trailGlyphDwell = [column[@"trailGlyphDwell"] doubleValue];
+        NSTimeInterval trailGlyphDwellAccumulator = [column[@"trailGlyphDwellAccumulator"] doubleValue] + delta;
+        NSTimeInterval headGlyphDwell = [column[@"headGlyphDwell"] doubleValue];
+        NSTimeInterval headGlyphDwellAccumulator = [column[@"headGlyphDwellAccumulator"] doubleValue] + delta;
         NSMutableArray<NSString *> *glyphs = column[@"glyphs"];
 
         offset += speed * delta;
@@ -341,19 +352,29 @@
         NSInteger rowsToProcess = MAX(0, completedRows - processedRows);
         NSInteger processedThisFrame = 0;
 
-        while (rowsToProcess > 0 && glyphDwellAccumulator >= glyphDwell) {
-            glyphDwellAccumulator -= glyphDwell;
+        while (rowsToProcess > 0 && trailGlyphDwellAccumulator >= trailGlyphDwell) {
+            trailGlyphDwellAccumulator -= trailGlyphDwell;
             [glyphs insertObject:[self randomGlyph] atIndex:0];
             [glyphs removeLastObject];
             processedThisFrame += 1;
             rowsToProcess -= 1;
-            glyphDwell = [self randomGlyphDwellTime];
+            trailGlyphDwell = [self randomGlyphDwellTime];
+        }
+
+        while (headGlyphDwellAccumulator >= headGlyphDwell) {
+            headGlyphDwellAccumulator -= headGlyphDwell;
+            if (glyphs.count > 0) {
+                glyphs[0] = [self randomGlyph];
+            }
+            headGlyphDwell = [self randomHeadGlyphDwellTime];
         }
 
         column[@"offset"] = @(offset);
         column[@"processedRows"] = @(processedRows + processedThisFrame);
-        column[@"glyphDwell"] = @(glyphDwell);
-        column[@"glyphDwellAccumulator"] = @(glyphDwellAccumulator);
+        column[@"trailGlyphDwell"] = @(trailGlyphDwell);
+        column[@"trailGlyphDwellAccumulator"] = @(trailGlyphDwellAccumulator);
+        column[@"headGlyphDwell"] = @(headGlyphDwell);
+        column[@"headGlyphDwellAccumulator"] = @(headGlyphDwellAccumulator);
 
         if (offset > bufferHeight + self.characterHeight) {
             [self recycleColumnAtIndex:columnIndex];
@@ -374,6 +395,11 @@
 - (NSTimeInterval)randomGlyphDwellTime
 {
     return SSRandomFloatBetween(0.05, 0.16);
+}
+
+- (NSTimeInterval)randomHeadGlyphDwellTime
+{
+    return SSRandomFloatBetween(0.025, 0.08);
 }
 
 - (void)updateBackingScaleFactor
