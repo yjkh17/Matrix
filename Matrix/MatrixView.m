@@ -324,7 +324,10 @@
 
     [self spawnColumnsWithDeltaTime:delta];
 
-    for (NSMutableDictionary *column in self.columns) {
+    CGFloat bufferHeight = self.frameBuffer.size.height;
+
+    for (NSInteger columnIndex = 0; columnIndex < self.columns.count; columnIndex++) {
+        NSMutableDictionary *column = self.columns[columnIndex];
         CGFloat offset = [column[@"offset"] doubleValue];
         CGFloat speed = [column[@"speed"] doubleValue];
         NSInteger processedRows = [column[@"processedRows"] integerValue];
@@ -351,7 +354,21 @@
         column[@"processedRows"] = @(processedRows + processedThisFrame);
         column[@"glyphDwell"] = @(glyphDwell);
         column[@"glyphDwellAccumulator"] = @(glyphDwellAccumulator);
+
+        if (offset > bufferHeight + self.characterHeight) {
+            [self recycleColumnAtIndex:columnIndex];
+        }
     }
+}
+
+- (void)recycleColumnAtIndex:(NSInteger)columnIndex
+{
+    if (columnIndex < 0 || columnIndex >= self.columnPositions.count) {
+        return;
+    }
+
+    CGFloat x = [self.columnPositions[columnIndex] doubleValue];
+    self.columns[columnIndex] = [self buildColumnAtX:x];
 }
 
 - (NSTimeInterval)randomGlyphDwellTime
