@@ -36,6 +36,7 @@
 - (void)ensureFrameBuffer;
 - (void)renderFrame;
 - (void)drawGlyphTrailAtPoint:(NSPoint)point withColor:(NSColor *)color;
+- (void)drawColumnGlowAtX:(CGFloat)x width:(CGFloat)width height:(CGFloat)height intensity:(CGFloat)intensity headOffset:(CGFloat)headOffset;
 
 @end
 
@@ -55,8 +56,8 @@
 
         _fadeLength = isPreview ? 10 : 18;
 
-        NSColor *primaryGreen = [NSColor colorWithCalibratedRed:0.70 green:1.0 blue:0.34 alpha:1.0];
-        NSColor *trailGreen = [NSColor colorWithCalibratedRed:0.0 green:0.84 blue:0.32 alpha:0.80];
+        NSColor *primaryGreen = [NSColor colorWithCalibratedRed:0.74 green:1.0 blue:0.46 alpha:1.0];
+        NSColor *trailGreen = [NSColor colorWithCalibratedRed:0.0 green:0.92 blue:0.36 alpha:0.9];
 
         _glyphAttributes = @{ NSFontAttributeName : _matrixFont,
                               NSForegroundColorAttributeName : trailGreen };
@@ -267,6 +268,34 @@
     [trailGradient drawInRect:streakRect angle:90.0];
 }
 
+- (void)drawColumnGlowAtX:(CGFloat)x width:(CGFloat)width height:(CGFloat)height intensity:(CGFloat)intensity headOffset:(CGFloat)headOffset
+{
+    if (intensity <= 0.0) {
+        return;
+    }
+
+    NSColor *coreColor = [NSColor colorWithCalibratedRed:0.45 green:1.0 blue:0.55 alpha:0.55 * intensity];
+    NSColor *rimColor = [coreColor colorWithAlphaComponent:0.02 * intensity];
+
+    CGFloat glowHeight = height + self.characterHeight * 2.5;
+    NSRect glowRect = NSMakeRect(x - width * 0.5,
+                                 headOffset - self.characterHeight * 1.25,
+                                 width,
+                                 glowHeight);
+
+    NSGradient *glow = [[NSGradient alloc] initWithColorsAndLocations:
+                        coreColor, 0.18,
+                        [coreColor colorWithAlphaComponent:0.32 * intensity], 0.35,
+                        [coreColor colorWithAlphaComponent:0.16 * intensity], 0.62,
+                        rimColor, 0.98,
+                        nil];
+
+    [NSGraphicsContext saveGraphicsState];
+    [[NSBezierPath bezierPathWithRoundedRect:glowRect xRadius:width * 0.35 yRadius:self.characterHeight] addClip];
+    [glow drawInRect:glowRect angle:90.0];
+    [NSGraphicsContext restoreGraphicsState];
+}
+
 - (void)addNextColumn
 {
     if (self.nextColumnIndex >= self.columnPositions.count) {
@@ -305,6 +334,22 @@
         CGFloat altOffset = [column[@"altXOffset"] doubleValue];
 
         CGFloat headY = bufferHeight - self.characterHeight - offset;
+
+        CGFloat beamWidth = self.characterWidth * (thick ? 2.7 : 2.2);
+        CGFloat headCenterY = headY + self.characterHeight * 0.5;
+        CGFloat glowIntensity = 0.82 + (thick ? 0.1 : 0.0);
+        [self drawColumnGlowAtX:x + jitter + self.characterWidth * 0.5
+                            width:beamWidth
+                           height:bufferHeight
+                        intensity:glowIntensity
+                       headOffset:headCenterY];
+        if (thick) {
+            [self drawColumnGlowAtX:x + jitter + altOffset + self.characterWidth * 0.5
+                                width:beamWidth * 0.92
+                               height:bufferHeight
+                            intensity:glowIntensity * 0.9
+                           headOffset:headCenterY];
+        }
 
         for (NSInteger row = 0; row < rows; row++) {
             CGFloat y = headY + (row * self.characterHeight);
@@ -395,7 +440,7 @@
     }
 
     CGFloat pulse = MAX(0.0, (sin(self.lastFrameTimestamp * 10.0) + 1.0) * 0.5 * freshness);
-    CGFloat glowAlpha = 0.35 + 0.35 * pulse;
+    CGFloat glowAlpha = 0.45 + 0.35 * pulse;
 
     NSPoint glowCenter = NSMakePoint(point.x + self.characterWidth * 0.5, point.y + self.characterHeight * 0.5);
     CGFloat glowRadiusX = self.characterWidth * 2.1;
@@ -409,7 +454,7 @@
                                                         endingColor:[headColor colorWithAlphaComponent:0.02]];
     [headGlow drawInRect:glowRect relativeCenterPosition:NSZeroPoint];
 
-    CGFloat highlightAlpha = 0.12 + 0.28 * pulse;
+    CGFloat highlightAlpha = 0.18 + 0.32 * pulse;
     if (highlightAlpha > 0.0) {
         NSGradient *pulseGradient = [[NSGradient alloc] initWithStartingColor:[[NSColor whiteColor] colorWithAlphaComponent:highlightAlpha]
                                                                  endingColor:[headColor colorWithAlphaComponent:0.0]];
@@ -421,7 +466,7 @@
     NSFont *sizedFont = [baseFont fontWithSize:baseFont.pointSize * 1.05];
     NSFont *boldFont = [[NSFontManager sharedFontManager] convertFont:sizedFont toHaveTrait:NSBoldFontMask] ?: sizedFont;
 
-    NSColor *emphasizedColor = [headColor blendedColorWithFraction:(0.14 + 0.26 * pulse) ofColor:[NSColor whiteColor]];
+    NSColor *emphasizedColor = [headColor blendedColorWithFraction:(0.20 + 0.32 * pulse) ofColor:[NSColor whiteColor]];
 
     NSMutableDictionary<NSAttributedStringKey, id> *emphasizedAttributes = [attributes mutableCopy];
     emphasizedAttributes[NSFontAttributeName] = boldFont;
@@ -486,7 +531,7 @@
 
     for (NSInteger fadeIndex = 0; fadeIndex <= length; fadeIndex++) {
         CGFloat fadeProgress = MIN(1.0, fadeIndex / (CGFloat)length);
-        CGFloat alphaFactor = pow((1.0 - fadeProgress), 2.2) * 0.85 + 0.02;
+        CGFloat alphaFactor = pow((1.0 - fadeProgress), 1.8) * 0.9 + 0.05;
 
         NSDictionary *entry = @{ NSFontAttributeName : self.matrixFont,
                                  NSForegroundColorAttributeName : [baseTrailColor colorWithAlphaComponent:(baseTrailColor.alphaComponent * alphaFactor)] };
