@@ -157,6 +157,11 @@ static const CGFloat kMinimumVisibleOpacity = 0.02;
         [positions addObject:@(x)];
     }
 
+    for (NSInteger index = positions.count - 1; index > 0; index--) {
+        NSUInteger swapIndex = arc4random_uniform((uint32_t)(index + 1));
+        [positions exchangeObjectAtIndex:index withObjectAtIndex:swapIndex];
+    }
+
     self.columnPositions = positions;
 
     self.rowsPerColumn = (NSInteger)ceil(height / self.characterHeight) + 4;
