@@ -16,6 +16,7 @@
 @property (nonatomic, assign) CGFloat characterWidth;
 @property (nonatomic, assign) CGFloat characterHeight;
 @property (nonatomic, assign) NSInteger columnCount;
+@property (nonatomic, assign) CGFloat lastWidth;
 
 @property (nonatomic, strong) NSArray<NSString *> *glyphSet;
 @property (nonatomic, strong) NSMutableArray<NSMutableDictionary *> *columns;
