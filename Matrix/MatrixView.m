@@ -304,8 +304,10 @@
         CGFloat jitter = [column[@"xJitter"] doubleValue];
         CGFloat altOffset = [column[@"altXOffset"] doubleValue];
 
+        CGFloat headY = bufferHeight - self.characterHeight - offset;
+
         for (NSInteger row = 0; row < rows; row++) {
-            CGFloat y = bufferHeight - ((row + 1) * self.characterHeight) - offset;
+            CGFloat y = headY + (row * self.characterHeight);
 
             if (y > bufferHeight + self.characterHeight) {
                 continue;
