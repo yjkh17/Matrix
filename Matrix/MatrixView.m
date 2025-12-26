@@ -29,6 +29,7 @@
 
 - (void)resetColumns;
 - (NSString *)randomGlyph;
+- (NSTimeInterval)randomGlyphDwellTime;
 - (void)ensureFrameBuffer;
 - (void)renderFrame;
 
@@ -170,7 +171,7 @@
 
 - (NSTimeInterval)randomColumnSpawnDelay
 {
-    return SSRandomFloatBetween(0.03, 0.16);
+    return SSRandomFloatBetween(0.12, 0.38);
 }
 
 - (void)ensureFrameBuffer
@@ -200,7 +201,7 @@
         [glyphs addObject:[self randomGlyph]];
     }
 
-    CGFloat baseSpeed = SSRandomFloatBetween(70.0, 140.0) * (self.characterHeight / 18.0);
+    CGFloat baseSpeed = SSRandomFloatBetween(50.0, 120.0) * (self.characterHeight / 18.0);
 
     CGFloat initialOffset = SSRandomFloatBetween(0, self.characterHeight * 0.6);
 
@@ -209,6 +210,8 @@
         @"offset" : @(initialOffset),
         @"processedRows" : @(floor(initialOffset / self.characterHeight)),
         @"speed" : @(baseSpeed),
+        @"glyphDwell" : @([self randomGlyphDwellTime]),
+        @"glyphDwellAccumulator" : @(0),
         @"x" : @(x)
     } mutableCopy];
 
@@ -322,21 +325,35 @@
         CGFloat offset = [column[@"offset"] doubleValue];
         CGFloat speed = [column[@"speed"] doubleValue];
         NSInteger processedRows = [column[@"processedRows"] integerValue];
+        NSTimeInterval glyphDwell = [column[@"glyphDwell"] doubleValue];
+        NSTimeInterval glyphDwellAccumulator = [column[@"glyphDwellAccumulator"] doubleValue] + delta;
         NSMutableArray<NSString *> *glyphs = column[@"glyphs"];
 
         offset += speed * delta;
 
         NSInteger completedRows = (NSInteger)floor(offset / self.characterHeight);
         NSInteger rowsToProcess = MAX(0, completedRows - processedRows);
+        NSInteger processedThisFrame = 0;
 
-        for (NSInteger step = 0; step < rowsToProcess; step++) {
+        while (rowsToProcess > 0 && glyphDwellAccumulator >= glyphDwell) {
+            glyphDwellAccumulator -= glyphDwell;
             [glyphs insertObject:[self randomGlyph] atIndex:0];
             [glyphs removeLastObject];
+            processedThisFrame += 1;
+            rowsToProcess -= 1;
+            glyphDwell = [self randomGlyphDwellTime];
         }
 
         column[@"offset"] = @(offset);
-        column[@"processedRows"] = @(completedRows);
+        column[@"processedRows"] = @(processedRows + processedThisFrame);
+        column[@"glyphDwell"] = @(glyphDwell);
+        column[@"glyphDwellAccumulator"] = @(glyphDwellAccumulator);
     }
+}
+
+- (NSTimeInterval)randomGlyphDwellTime
+{
+    return SSRandomFloatBetween(0.05, 0.16);
 }
 
 - (void)updateBackingScaleFactor
