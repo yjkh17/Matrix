@@ -53,8 +53,8 @@
 
         _fadeLength = isPreview ? 10 : 18;
 
-        NSColor *primaryGreen = [NSColor colorWithCalibratedRed:0.0 green:0.9 blue:0.5 alpha:0.9];
-        NSColor *trailGreen = [NSColor colorWithCalibratedRed:0.0 green:0.7 blue:0.3 alpha:0.6];
+        NSColor *primaryGreen = [NSColor colorWithCalibratedRed:0.08 green:1.0 blue:0.62 alpha:0.95];
+        NSColor *trailGreen = [NSColor colorWithCalibratedRed:0.04 green:0.94 blue:0.48 alpha:0.72];
 
         _glyphAttributes = @{ NSFontAttributeName : _matrixFont,
                               NSForegroundColorAttributeName : trailGreen };
@@ -198,8 +198,9 @@
     if (!self.frameBuffer || sizeChanged) {
         self.frameBuffer = [[NSImage alloc] initWithSize:currentSize];
         [self.frameBuffer lockFocus];
-        [[NSColor blackColor] set];
-        NSRectFill(NSMakeRect(0, 0, currentSize.width, currentSize.height));
+        NSGradient *deepGreenGradient = [[NSGradient alloc] initWithStartingColor:[NSColor colorWithCalibratedRed:0.01 green:0.1 blue:0.05 alpha:1.0]
+                                                                      endingColor:[NSColor colorWithCalibratedRed:0.04 green:0.16 blue:0.08 alpha:1.0]];
+        [deepGreenGradient drawInRect:NSMakeRect(0, 0, currentSize.width, currentSize.height) angle:270.0];
         [self.frameBuffer unlockFocus];
         [self resetColumns];
     }
@@ -248,10 +249,7 @@
 
     NSRect imageRect = NSMakeRect(0, 0, self.frameBuffer.size.width, self.frameBuffer.size.height);
 
-    [[NSColor colorWithCalibratedWhite:0.0 alpha:0.14] set];
-    NSRectFillUsingOperation(imageRect, NSCompositingOperationSourceOver);
-
-    [[NSColor colorWithCalibratedRed:0.02 green:0.08 blue:0.05 alpha:0.06] set];
+    [[NSColor colorWithCalibratedRed:0.02 green:0.1 blue:0.06 alpha:0.08] set];
     NSRectFillUsingOperation(imageRect, NSCompositingOperationSourceOver);
 
     CGFloat bufferHeight = self.frameBuffer.size.height;
