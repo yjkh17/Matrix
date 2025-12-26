@@ -160,6 +160,11 @@
         [positions addObject:@(x)];
     }
 
+    for (NSInteger shuffleIndex = positions.count - 1; shuffleIndex > 0; shuffleIndex--) {
+        u_int32_t swapIndex = arc4random_uniform((u_int32_t)(shuffleIndex + 1));
+        [positions exchangeObjectAtIndex:shuffleIndex withObjectAtIndex:swapIndex];
+    }
+
     self.columnPositions = positions;
 
     NSInteger maxFadeLength = self.fadeLength + 8;
@@ -277,7 +282,7 @@
         CGFloat altOffset = [column[@"altXOffset"] doubleValue];
 
         for (NSInteger row = 0; row < rows; row++) {
-            CGFloat y = bufferHeight - ((row + 1) * self.characterHeight) + offset;
+            CGFloat y = bufferHeight - ((row + 1) * self.characterHeight) - offset;
 
             if (y > bufferHeight + self.characterHeight) {
                 continue;
