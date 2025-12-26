@@ -338,15 +338,56 @@
 {
     NSColor *headColor = attributes[NSForegroundColorAttributeName];
 
+    CGFloat bufferHeight = self.frameBuffer.size.height;
+    CGFloat freshness = 0.0;
+    if (bufferHeight > 0) {
+        CGFloat headOffset = point.y - (bufferHeight - self.characterHeight);
+        headOffset = MAX(0.0, MIN(self.characterHeight, headOffset));
+        freshness = 1.0 - (headOffset / self.characterHeight);
+    }
+
+    CGFloat pulse = MAX(0.0, (sin(self.lastFrameTimestamp * 10.0) + 1.0) * 0.5 * freshness);
+    CGFloat glowAlpha = 0.35 + 0.35 * pulse;
+
+    NSPoint glowCenter = NSMakePoint(point.x + self.characterWidth * 0.5, point.y + self.characterHeight * 0.5);
+    CGFloat glowRadiusX = self.characterWidth * 2.1;
+    CGFloat glowRadiusY = self.characterHeight * 2.1;
+    NSRect glowRect = NSMakeRect(glowCenter.x - glowRadiusX * 0.5,
+                                 glowCenter.y - glowRadiusY * 0.5,
+                                 glowRadiusX,
+                                 glowRadiusY);
+
+    NSGradient *headGlow = [[NSGradient alloc] initWithStartingColor:[headColor colorWithAlphaComponent:glowAlpha]
+                                                        endingColor:[headColor colorWithAlphaComponent:0.02]];
+    [headGlow drawInRect:glowRect relativeCenterPosition:NSZeroPoint];
+
+    CGFloat highlightAlpha = 0.12 + 0.28 * pulse;
+    if (highlightAlpha > 0.0) {
+        NSGradient *pulseGradient = [[NSGradient alloc] initWithStartingColor:[[NSColor whiteColor] colorWithAlphaComponent:highlightAlpha]
+                                                                 endingColor:[headColor colorWithAlphaComponent:0.0]];
+        [pulseGradient drawInRect:NSInsetRect(glowRect, -self.characterWidth * 0.2, -self.characterHeight * 0.2)
+             relativeCenterPosition:NSZeroPoint];
+    }
+
+    NSFont *baseFont = attributes[NSFontAttributeName];
+    NSFont *sizedFont = [baseFont fontWithSize:baseFont.pointSize * 1.05];
+    NSFont *boldFont = [[NSFontManager sharedFontManager] convertFont:sizedFont toHaveTrait:NSBoldFontMask] ?: sizedFont;
+
+    NSColor *emphasizedColor = [headColor blendedColorWithFraction:(0.18 + 0.3 * pulse) ofColor:[NSColor whiteColor]];
+
+    NSMutableDictionary<NSAttributedStringKey, id> *emphasizedAttributes = [attributes mutableCopy];
+    emphasizedAttributes[NSFontAttributeName] = boldFont;
+    emphasizedAttributes[NSForegroundColorAttributeName] = emphasizedColor ?: headColor;
+
     [NSGraphicsContext saveGraphicsState];
-    self.headGlowShadow.shadowColor = [headColor colorWithAlphaComponent:0.85];
+    self.headGlowShadow.shadowColor = [headColor colorWithAlphaComponent:MIN(1.0, 0.85 + 0.3 * pulse)];
     [self.headGlowShadow set];
-    [glyph drawAtPoint:point withAttributes:attributes];
+    [glyph drawAtPoint:NSMakePoint(point.x, point.y) withAttributes:emphasizedAttributes];
     [NSGraphicsContext restoreGraphicsState];
 
     NSDictionary *punchAttributes = @{
-        NSFontAttributeName : attributes[NSFontAttributeName],
-        NSForegroundColorAttributeName : [headColor colorWithAlphaComponent:0.65]
+        NSFontAttributeName : boldFont,
+        NSForegroundColorAttributeName : [headColor colorWithAlphaComponent:0.65 + 0.2 * pulse]
     };
 
     [glyph drawAtPoint:point withAttributes:punchAttributes];
